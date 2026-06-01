@@ -89,8 +89,8 @@ log "=== wifi cert connection test START ==="
 log "cert=$CERT_CON fallback=$MGMT_CON timeout=${TIMEOUT}s ping=$PING_TARGET"
 
 add "📶 <b>Cert Wi-Fi enrolment test</b>"
-add "🖥 Host: <code>${HOST}</code>"
-add "🕒 $(ts)"
+add "Host: <code>${HOST}</code>"
+add "<code>$(ts)</code>"
 add "SSID <code>${SSID}</code> · fallback <code>${MGMT_CON}</code>"
 add ""
 
@@ -115,12 +115,12 @@ if [ "$ok" -ne 1 ]; then
   add "❌ Did not associate to <code>${SSID}</code> within ${TIMEOUT}s"
   restore_mgmt
   if wait_internet; then
-    add "🔄 Fell back to <code>${MGMT_CON}</code> — internet OK"
+    add "Fell back to <code>${MGMT_CON}</code> — internet OK"
   else
-    add "🔄 Fell back to <code>${MGMT_CON}</code> — ⚠️ internet not confirmed"
+    add "Fell back to <code>${MGMT_CON}</code> — internet not confirmed"
   fi
   add ""
-  add "<b>Result: FAILED</b> (profile rolled back)"
+  add "❌ <b>Result: FAILED</b> (profile rolled back)"
   exit 0
 fi
 
@@ -134,7 +134,7 @@ if ping -c "$PING_COUNT" -W 2 "$PING_TARGET" >> "$LOG" 2>&1; then
   # --- Step 4 success: ping OK -> STAY on cert ---------------------------
   log "SUCCESS: ping $PING_TARGET OK — staying on $CERT_CON"
   echo "SUCCESS" > "$STATUS"
-  add "🌐 Ping ${PING_TARGET}: OK"
+  add "Ping ${PING_TARGET}: OK"
   add ""
   add "✅ <b>Result: connected to <code>${SSID}</code> — staying.</b>"
   exit 0
@@ -143,13 +143,13 @@ fi
 # --- Step 4 fallback: associated but no internet -> fall back -------------
 log "ping $PING_TARGET FAILED — rolling back"
 echo "FALLBACK" > "$STATUS"
-add "🌐 Ping ${PING_TARGET}: ❌ failed"
+add "Ping ${PING_TARGET}: failed"
 restore_mgmt
 if wait_internet; then
-  add "🔄 Fell back to <code>${MGMT_CON}</code> — internet OK"
+  add "Fell back to <code>${MGMT_CON}</code> — internet OK"
 else
-  add "🔄 Fell back to <code>${MGMT_CON}</code> — ⚠️ internet not confirmed"
+  add "Fell back to <code>${MGMT_CON}</code> — internet not confirmed"
 fi
 add ""
-add "<b>Result: FALLBACK</b> (cert had no internet, profile rolled back)"
+add "❌ <b>Result: FALLBACK</b> (cert had no internet, profile rolled back)"
 exit 0
