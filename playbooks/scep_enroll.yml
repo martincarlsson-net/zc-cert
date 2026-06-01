@@ -4,14 +4,53 @@
 #
 # Designed for ansible-pull: run directly on the enrolling Fedora client:
 #   sudo ansible-pull -U https://github.com/martincarlsson-net/zc-cert.git \
-#     -i inventory/hosts playbooks/scep_enroll.yml --ask-vault-pass
+#     playbooks/scep_enroll.yml --ask-vault-pass
 #
-# Secrets (SCEP URL, CA names, challenge password, org details, Wi-Fi SSID) are
-# stored in group_vars/all/vault.yml, encrypted with ansible-vault. 
+# Secrets (SCEP URL, CA names, challenge password, org details, Wi-Fi SSID,
+# Telegram credentials) are stored in group_vars/all/vault.yml (ansible-vault).
 - name: SCEP certificate enrolment and EAP-TLS Wi-Fi profile deployment
   hosts: wifi_clients
   become: true
-  roles:
-    - scep_client   # install certmonger, deploy CA trust, register the SCEP CA
-    - scep_enroll   # request the device certificate and wait for issuance
-    - wifi_profile  # deploy the EAP-TLS Wi-Fi profile, test + automatic rollback
+  tasks:
+    # Wrap all three roles in a block so any failure is caught by the rescue.
+    - block:
+        - include_role:
+            name: scep_client   # install certmonger, deploy CA trust, register the SCEP CA
+
+        - include_role:
+            name: scep_enroll   # request the device certificate and wait for issuance
+
+        - include_role:
+            name: wifi_profile  # deploy the EAP-TLS Wi-Fi profile, test + automatic rollback
+
+      rescue:
+        # Send a Telegram alert with the failed task name and error message so
+        # operators learn about failures even when they are not watching the run.
+        # failed_when: false ensures the notification task never masks the real error.
+        - name: Send Telegram failure notification
+          uri:
+            url: "https://api.telegram.org/bot{{ telegram_bot_token }}/sendMessage"
+            method: POST
+            body_format: json
+            body:
+              chat_id: "{{ telegram_chat_id }}"
+              parse_mode: "HTML"
+              text: >-
+                ❌ <b>Cert enrolment failed</b>
+
+                Host: <code>{{ ansible_facts['hostname'] }}</code>
+                <code>{{ ansible_date_time.date }} {{ ansible_date_time.time }}</code>
+
+                Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
+
+                Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}{% if ansible_failed_result.stderr | default('') %}
+
+                Detail: {{ ansible_failed_result.stderr | replace('<', '&lt;') | replace('>', '&gt;') }}{% endif %}
+            status_code: 200
+          failed_when: false
+
+        # Re-raise so the run still exits non-zero and ansible-pull reports failure.
+        - name: Re-raise the original failure
+          fail:
+            msg: >-
+              {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}

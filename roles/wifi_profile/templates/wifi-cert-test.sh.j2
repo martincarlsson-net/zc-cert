@@ -88,11 +88,28 @@ wait_internet() {
 log "=== wifi cert connection test START ==="
 log "cert=$CERT_CON fallback=$MGMT_CON timeout=${TIMEOUT}s ping=$PING_TARGET"
 
-add "📶 <b>Cert Wi-Fi enrolment test</b>"
+add "📶 <b>Cert Wi-Fi enrolment</b>"
 add "Host: <code>${HOST}</code>"
 add "<code>$(ts)</code>"
 add "SSID <code>${SSID}</code> · fallback <code>${MGMT_CON}</code>"
 add ""
+
+# Include cert details written by scep_enroll (CN, expiry, new vs existing).
+if [ -f /var/log/zc-enroll.status ]; then
+  _enrolled=$(grep '^ENROLLED=' /var/log/zc-enroll.status | cut -d= -f2-)
+  _subject=$(grep '^SUBJECT='  /var/log/zc-enroll.status | cut -d= -f2-)
+  _expires=$(grep '^EXPIRES='  /var/log/zc-enroll.status | cut -d= -f2-)
+  _issuer=$(grep  '^ISSUER='   /var/log/zc-enroll.status | cut -d= -f2-)
+  add "Cert: <code>${_subject}</code>"
+  add "Expires: <code>${_expires}</code>"
+  add "Issuer: <code>${_issuer}</code>"
+  if [ "$_enrolled" = "NEW" ]; then
+    add "Enrolment: new certificate issued"
+  else
+    add "Enrolment: existing certificate reused"
+  fi
+  add ""
+fi
 
 # --- Step 1/2: try to activate the cert connection ------------------------
 log "activating $CERT_CON ..."

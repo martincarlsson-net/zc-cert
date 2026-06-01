@@ -66,3 +66,15 @@
   assert:
     that: "'status: MONITORING' in scep_cert_final.stdout"
     fail_msg: "SCEP enrolment did not reach MONITORING — see the status above."
+
+# Write a summary consumed by the wifi_profile test script to populate the
+# Telegram message with cert details (new vs existing, CN, expiry, issuer).
+- name: Write enrolment summary for Telegram notification
+  copy:
+    dest: /var/log/zc-enroll.status
+    mode: "0644"
+    content: |
+      ENROLLED={{ 'NEW' if (scep_cert_request is defined and scep_cert_request is changed) else 'EXISTING' }}
+      SUBJECT={{ scep_cert_final.stdout | regex_search('subject:\s+(.+)', '\1') | first | default('unknown') }}
+      EXPIRES={{ scep_cert_final.stdout | regex_search('expires:\s+(.+)', '\1') | first | default('unknown') }}
+      ISSUER={{ scep_cert_final.stdout | regex_search('issuer:\s+(.+)', '\1') | first | default('unknown') }}
