@@ -12,8 +12,11 @@
   hosts: wifi_clients
   become: true
   tasks:
-    # Wrap all three roles in a block so any failure is caught by the rescue.
+    # Wrap everything in a block so any failure is caught by the rescue.
     - block:
+        - include_role:
+            name: telegram      # deploy the shared Telegram sender (used below + by the test)
+
         - include_role:
             name: scep_client   # install certmonger, deploy CA trust, register the SCEP CA
 
@@ -24,30 +27,24 @@
             name: wifi_profile  # deploy the EAP-TLS Wi-Fi profile, test + automatic rollback
 
       rescue:
-        # Send a Telegram alert with the failed task name and error message so
-        # operators learn about failures even when they are not watching the run.
-        # failed_when: false ensures the notification task never masks the real error.
+        # Alert via the shared sender (DoH + --resolve + retry + ok:true), so the
+        # failure notification gets through despite the network filtering Telegram
+        # on plain DNS — the Ansible uri module could not. failed_when: false keeps
+        # the notification from masking the real error. The message is passed as a
+        # single argv element so its newlines and HTML are preserved.
         - name: Send Telegram failure notification
-          uri:
-            url: "https://api.telegram.org/bot{{ telegram_bot_token }}/sendMessage"
-            method: POST
-            body_format: json
-            body:
-              chat_id: "{{ telegram_chat_id }}"
-              parse_mode: "HTML"
-              text: >-
+          command:
+            argv:
+              - "{{ telegram_send_script }}"
+              - |-
                 ❌ <b>Cert enrolment failed</b>
-
                 Host: <code>{{ ansible_facts['hostname'] }}</code>
                 <code>{{ ansible_date_time.date }} {{ ansible_date_time.time }}</code>
 
                 Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
-
-                Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}{% if ansible_failed_result.stderr | default('') %}
-
-                Detail: {{ ansible_failed_result.stderr | replace('<', '&lt;') | replace('>', '&gt;') }}{% endif %}
-            status_code: 200
+                Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
           failed_when: false
+          changed_when: false
 
         # Re-raise so the run still exits non-zero and ansible-pull reports failure.
         - name: Re-raise the original failure

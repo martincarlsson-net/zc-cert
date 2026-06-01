@@ -22,8 +22,7 @@ PING_COUNT={{ wifi_ping_count }}
 RESTORE_WAIT={{ wifi_internet_restore_wait }}
 LOG="{{ wifi_test_log }}"
 STATUS="{{ wifi_test_status }}"
-BOT_TOKEN="{{ telegram_bot_token }}"
-CHAT_ID="{{ telegram_chat_id }}"
+TELEGRAM_SEND="{{ telegram_send_script }}"
 HOST="$(hostname)"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
@@ -31,99 +30,17 @@ log() { echo "$(ts) $*" >> "$LOG"; }
 
 # --- Telegram summary -----------------------------------------------------
 # Lines accumulate in SUMMARY as the test progresses; one message is sent at
-# the very end (or on early exit via the trap), HTML-formatted.
+# the very end (or on early exit via the trap) through the shared sender, which
+# handles DoH resolution, --resolve pinning, retries and delivery confirmation.
 SUMMARY=""
 add() { SUMMARY="${SUMMARY}${1}"$'\n'; }
-
-# The network's DNS resolver (port 53) FILTERS api.telegram.org by name — it
-# returns no A record on both the cert and management segments — while the IP
-# route and HTTPS (443) to Telegram stay open. So we resolve the name over
-# DNS-over-HTTPS (port 443, to public resolvers by IP), which bypasses the
-# filter, then pin the IP with curl --resolve for the actual send.
-TG_HOST="api.telegram.org"
-TG_IP=""
-
-# Resolve an A record over DoH (HTTPS/443) via public resolvers addressed by IP,
-# so it works with no usable plain DNS. Echoes the first IPv4 found.
-resolve_via_doh() {
-  local host="$1" url ip
-  for url in "https://8.8.8.8/resolve?name=${host}&type=A" \
-             "https://1.1.1.1/dns-query?name=${host}&type=A"; do
-    ip="$(curl -sS -m 8 "$url" -H 'accept: application/dns-json' 2>/dev/null \
-          | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')"
-    [ -n "$ip" ] && { echo "$ip"; return 0; }
-  done
-  return 1
-}
-
-# Wait briefly for basic internet (the radio may still be settling after a
-# Wi-Fi switch). Returns as soon as the ping target answers, up to ~timeout s.
-net_ready() {
-  local i
-  for i in $(seq 1 "${1:-10}"); do
-    ping -c 1 -W 2 "$PING_TARGET" >/dev/null 2>&1 && return 0
-    sleep 1
-  done
-  return 1
-}
-
-send_telegram() {
-  local text="$1"
-  local max=3500
-  # Telegram/our own cap: trim to max bytes and flag if we cut anything.
-  if [ "$(printf '%s' "$text" | wc -c)" -gt "$max" ]; then
-    text="$(printf '%s' "$text" | head -c $((max - 80)))"
-    text="${text}"$'\n\n'"… ✂️ <i>truncated — 3500-byte limit exceeded</i>"
-  fi
-
-  # Escalating backoff (seconds) BEFORE each attempt; first attempt is immediate.
-  local backoffs=({{ telegram_backoffs }})
-  local attempt=0 delay resp resolve_opt
-
-  for delay in "${backoffs[@]}"; do
-    attempt=$((attempt + 1))
-    if [ "$delay" -gt 0 ]; then
-      log "telegram: waiting ${delay}s before attempt ${attempt}"
-      sleep "$delay"
-    fi
-
-    # Gate on connectivity, then (re)resolve over DoH if we don't have an IP yet
-    # (the network filters api.telegram.org on plain DNS, so DoH is required).
-    net_ready 10 || log "telegram attempt ${attempt}: no internet yet, trying anyway"
-    if [ -z "$TG_IP" ]; then
-      TG_IP="$(resolve_via_doh "$TG_HOST" || true)"
-      [ -n "$TG_IP" ] && log "telegram: resolved ${TG_HOST} -> ${TG_IP} (DoH)"
-    fi
-    resolve_opt=()
-    [ -n "$TG_IP" ] && resolve_opt=(--resolve "${TG_HOST}:443:${TG_IP}")
-
-    # Capture the response so we can confirm real delivery ("ok":true), not just
-    # a zero curl exit code (Telegram can return ok:false with HTTP 200).
-    resp="$(curl -sS -m 15 "${resolve_opt[@]}" -X POST \
-      "https://${TG_HOST}/bot${BOT_TOKEN}/sendMessage" \
-      -d chat_id="${CHAT_ID}" \
-      -d parse_mode="HTML" \
-      -d disable_web_page_preview="true" \
-      --data-urlencode text="${text}" 2>>"$LOG")"
-    echo "$resp" >> "$LOG"
-
-    if printf '%s' "$resp" | grep -q '"ok":true'; then
-      log "telegram DELIVERED (attempt ${attempt}, ip=${TG_IP:-dns})"
-      return 0
-    fi
-    log "telegram attempt ${attempt} not confirmed (no ok:true) — will retry"
-  done
-
-  log "telegram send FAILED after ${attempt} attempts"
-  return 1
-}
 
 # Guarantee a summary is sent even if the script dies unexpectedly.
 sent=0
 finish() {
   if [ "$sent" -eq 0 ]; then
     sent=1
-    send_telegram "$SUMMARY"
+    "$TELEGRAM_SEND" "$SUMMARY" >> "$LOG" 2>&1
   fi
   log "=== wifi cert connection test END (status=$(cat "$STATUS" 2>/dev/null)) ==="
 }
@@ -154,11 +71,6 @@ wait_internet() {
 
 log "=== wifi cert connection test START ==="
 log "cert=$CERT_CON fallback=$MGMT_CON timeout=${TIMEOUT}s ping=$PING_TARGET"
-
-# Resolve Telegram via DoH up front (the network filters it on plain DNS); the
-# pinned IP is used for the final notification regardless of which net we end on.
-TG_IP="$(resolve_via_doh "$TG_HOST" || true)"
-log "pre-resolved (DoH) $TG_HOST -> ${TG_IP:-FAILED (will fall back to plain DNS)}"
 
 add "📶 <b>Cert Wi-Fi enrolment</b>"
 add "Host: <code>${HOST}</code>"

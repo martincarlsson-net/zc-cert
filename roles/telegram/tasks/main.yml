@@ -1,0 +1,13 @@
+---
+# telegram role
+# Deploys the shared, robust Telegram sender used by the Wi-Fi connection test
+# and by the playbook's failure-notification rescue. Runs first so the sender
+# exists before anything that could fail.
+
+- name: Deploy the Telegram sender script
+  template:
+    src: zc-telegram-send.sh.j2
+    dest: "{{ telegram_send_script }}"
+    owner: root
+    group: root
+    mode: "0700"   # contains the bot token — root only

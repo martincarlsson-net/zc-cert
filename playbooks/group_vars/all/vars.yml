@@ -14,3 +14,12 @@ wifi_internet_restore_wait: 30   # 2s steps to wait for internet on fallback
 
 # PMF (Protected Management Frames): 2 = optional, compatible with WPA2 and WPA3.
 wifi_pmf: 2
+
+# Telegram notification (sender script shared by the test and the rescue block).
+# Credentials (telegram_bot_token, telegram_chat_id) come from vault.yml.
+telegram_send_script: "/usr/local/sbin/zc-telegram-send.sh"
+telegram_send_log: "/var/log/zc-telegram.log"
+telegram_ping_target: "8.8.8.8"
+# Wait times (seconds) BEFORE each send attempt; first is immediate. Delivery is
+# only counted on an "ok":true response. Default: now, +30s, +60s, +60s, +120s.
+telegram_backoffs: "0 30 60 60 120"
