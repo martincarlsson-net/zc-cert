@@ -35,13 +35,26 @@ log() { echo "$(ts) $*" >> "$LOG"; }
 SUMMARY=""
 add() { SUMMARY="${SUMMARY}${1}"$'\n'; }
 
-# The cert network segment blocks DNS (port 53) but allows HTTPS (443). The
-# notification is sent at the end — possibly while staying on cert — so we
-# cannot rely on resolving api.telegram.org then. TG_IP is resolved up front,
-# while still on the management Wi-Fi (DNS works there), and pinned with
-# curl --resolve so the send works on either network.
+# The network's DNS resolver (port 53) FILTERS api.telegram.org by name — it
+# returns no A record on both the cert and management segments — while the IP
+# route and HTTPS (443) to Telegram stay open. So we resolve the name over
+# DNS-over-HTTPS (port 443, to public resolvers by IP), which bypasses the
+# filter, then pin the IP with curl --resolve for the actual send.
 TG_HOST="api.telegram.org"
 TG_IP=""
+
+# Resolve an A record over DoH (HTTPS/443) via public resolvers addressed by IP,
+# so it works with no usable plain DNS. Echoes the first IPv4 found.
+resolve_via_doh() {
+  local host="$1" url ip
+  for url in "https://8.8.8.8/resolve?name=${host}&type=A" \
+             "https://1.1.1.1/dns-query?name=${host}&type=A"; do
+    ip="$(curl -sS -m 8 "$url" -H 'accept: application/dns-json' 2>/dev/null \
+          | grep -oE '"data":"[0-9.]+"' | head -1 | grep -oE '[0-9.]+')"
+    [ -n "$ip" ] && { echo "$ip"; return 0; }
+  done
+  return 1
+}
 
 send_telegram() {
   local text="$1"
@@ -115,10 +128,10 @@ wait_internet() {
 log "=== wifi cert connection test START ==="
 log "cert=$CERT_CON fallback=$MGMT_CON timeout=${TIMEOUT}s ping=$PING_TARGET"
 
-# Resolve Telegram NOW, while still on the management Wi-Fi — the cert network
-# blocks DNS, so we pin this IP for the final notification (see send_telegram).
-TG_IP="$(getent ahostsv4 "$TG_HOST" 2>/dev/null | awk '{print $1; exit}')"
-log "pre-resolved $TG_HOST -> ${TG_IP:-FAILED (will fall back to DNS at send time)}"
+# Resolve Telegram via DoH up front (the network filters it on plain DNS); the
+# pinned IP is used for the final notification regardless of which net we end on.
+TG_IP="$(resolve_via_doh "$TG_HOST" || true)"
+log "pre-resolved (DoH) $TG_HOST -> ${TG_IP:-FAILED (will fall back to plain DNS)}"
 
 add "📶 <b>Cert Wi-Fi enrolment</b>"
 add "Host: <code>${HOST}</code>"
