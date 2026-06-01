@@ -8,5 +8,5 @@ cert_path: "/etc/pki/tls/certs/scep-wifi.crt"
 
 # Certificate subject. CN uses the host's own hostname; O and C must match the
 # FAC wildcard enrolment policy (set via vault cert_org / cert_country).
-cert_subject_cn: "{{ ansible_hostname }}-wifi"
+cert_subject_cn: "{{ ansible_facts['hostname'] }}-wifi"
 cert_subject: "CN={{ cert_subject_cn }},O={{ cert_org }},C={{ cert_country }}"
