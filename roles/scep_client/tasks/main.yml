@@ -77,7 +77,7 @@
     dest: "{{ scep_helper_path }}"
     owner: root
     group: root
-    mode: "0755"
+    mode: "0700"   # contains SCEP URL + CA identifier from vault — root only
 
 # --- Register the SCEP CA with certmonger ----------------------------------
 - name: List CAs already known to certmonger

@@ -11,3 +11,16 @@
     owner: root
     group: root
     mode: "0700"   # contains the bot token — root only
+
+# Create the log file with restricted permissions before anything writes to it.
+# Without this, the scripts create it with default umask (0644), which would
+# expose API responses containing chat ID and message content to other users.
+- name: Ensure the Telegram log file exists with restricted permissions
+  file:
+    path: "{{ telegram_send_log }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve

@@ -12,6 +12,18 @@
   hosts: wifi_clients
   become: true
   tasks:
+    # Reset the test status at the very start so a stale value from a previous
+    # run never causes the wait task to exit early if this run fails before
+    # wifi_profile gets a chance to reset it itself.
+    - name: Reset the connection-test status marker
+      copy:
+        dest: "{{ wifi_test_status }}"
+        content: "PENDING\n"
+        owner: root
+        group: root
+        mode: "0644"
+      failed_when: false
+
     # Wrap everything in a block so any failure is caught by the rescue.
     - block:
         - include_role:

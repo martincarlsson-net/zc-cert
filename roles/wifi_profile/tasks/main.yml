@@ -115,6 +115,18 @@
       - "wifi_client_cert in wifi_profile_check.stdout"
     fail_msg: "The cert Wi-Fi profile was not created correctly: {{ wifi_profile_check.stdout }}"
 
+# Ensure the test log exists with restricted permissions before any script writes
+# to it. Default umask would create it 0644, exposing connection details.
+- name: Ensure the connection-test log file exists with restricted permissions
+  file:
+    path: "{{ wifi_test_log }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve
+
 # --- Deploy the detached test + failsafe scripts --------------------------
 - name: Deploy the detached connection-test script
   template:
@@ -141,6 +153,13 @@
     mode: "0644"
 
 # --- Run the test detached, then recover the SSH connection ---------------
+# Stop any leftover units from a previous run before starting new ones.
+# Without this, systemd-run fails if the unit name already exists.
+- name: Stop any leftover test or failsafe units from a previous run
+  command: systemctl stop wifi-cert-test.service wifi-cert-failsafe.service
+  failed_when: false
+  changed_when: false
+
 # Failsafe first: force the management Wi-Fi back after wifi_failsafe_delay,
 # independent of the test, so the host can never be left stranded.
 - name: Schedule the management-Wi-Fi failsafe (transient systemd timer)

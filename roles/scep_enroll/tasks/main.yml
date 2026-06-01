@@ -29,6 +29,17 @@
   failed_when: false
   changed_when: false
 
+# If a previous enrollment attempt left certmonger in a stuck state
+# (CA_UNREACHABLE, CA_REJECTED, etc.) stop tracking before trying again.
+# Without this, getcert request fails because the path is already tracked.
+- name: Stop tracking a stuck previous enrollment attempt
+  command: getcert stop-tracking -f "{{ cert_path }}"
+  when:
+    - scep_cert_check.rc == 0
+    - "'status: MONITORING' not in scep_cert_check.stdout"
+  failed_when: false
+  changed_when: false
+
 - name: Request the device certificate over SCEP
   command: >
     getcert request
@@ -41,14 +52,15 @@
   register: scep_cert_request
 
 # certmonger enrols asynchronously; poll until it reaches a terminal state.
-- name: Wait for the certificate to reach a terminal state (up to 60s)
+# 24 retries × 5s = 120s — more headroom for a loaded FAC in production.
+- name: Wait for the certificate to reach a terminal state (up to 120s)
   command: getcert list -f "{{ cert_path }}"
   register: scep_cert_status
   until: >
     'status: MONITORING' in scep_cert_status.stdout or
     'status: CA_REJECTED' in scep_cert_status.stdout or
     'status: CA_UNREACHABLE' in scep_cert_status.stdout
-  retries: 12
+  retries: 24
   delay: 5
   changed_when: false
   when: scep_cert_request is changed
@@ -72,7 +84,7 @@
 - name: Write enrolment summary for Telegram notification
   copy:
     dest: /var/log/zc-enroll.status
-    mode: "0644"
+    mode: "0600"
     content: |
       ENROLLED={{ 'NEW' if (scep_cert_request is defined and scep_cert_request is changed) else 'EXISTING' }}
       SUBJECT={{ scep_cert_final.stdout | regex_search('subject:\s+(.+)', '\1') | first | default('unknown') }}
