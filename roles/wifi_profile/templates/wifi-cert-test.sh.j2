@@ -1,38 +1,103 @@
 #!/bin/bash
-# Detached Wi-Fi connection test with automatic rollback.
+# Detached Wi-Fi connection test with ping verification and fallback.
 # Managed by Ansible (wifi_profile role) — do not edit by hand.
 #
-# Runs independently of the SSH/Ansible session because activating the "cert"
-# Wi-Fi drops the management Wi-Fi on the same radio (and thus the SSH link).
-# It tries to bring up the cert connection, waits up to {{ wifi_connect_timeout }}s,
-# and ALWAYS restores the management connection afterward so the host stays
-# remotely reachable. On failure it also deletes the cert profile (rollback).
+# Runs independently of the SSH/Ansible session because activating the cert
+# Wi-Fi drops the fallback Wi-Fi on the same radio (and thus any SSH link).
+#
+# Flow:
+#   1. Try to bring up the cert connection (waits up to TIMEOUT seconds).
+#   2. If it does not activate -> fall back to the previous Wi-Fi.
+#   3. If it activates -> ping test. Ping fails -> fall back. Ping OK -> STAY.
+#   4. If fell back, wait for internet to be restored on the fallback link.
+#   5. Send a Telegram summary of the whole attempt (always, even on error).
 set -u
 
 CERT_CON="{{ wifi_con_name }}"
 MGMT_CON="{{ wifi_mgmt_con }}"
+SSID="{{ wifi_ssid }}"
 TIMEOUT={{ wifi_connect_timeout }}
+PING_TARGET="{{ wifi_ping_target }}"
+PING_COUNT={{ wifi_ping_count }}
+RESTORE_WAIT={{ wifi_internet_restore_wait }}
 LOG="{{ wifi_test_log }}"
 STATUS="{{ wifi_test_status }}"
+BOT_TOKEN="{{ telegram_bot_token }}"
+CHAT_ID="{{ telegram_chat_id }}"
+HOST="$(hostname)"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "$(ts) $*" >> "$LOG"; }
 
-restore_mgmt() {
-  if [ -n "$MGMT_CON" ]; then
-    log "restoring management connection: $MGMT_CON"
-    nmcli connection up "$MGMT_CON" >> "$LOG" 2>&1
+# --- Telegram summary -----------------------------------------------------
+# Lines accumulate in SUMMARY as the test progresses; one message is sent at
+# the very end (or on early exit via the trap), HTML-formatted.
+SUMMARY=""
+add() { SUMMARY="${SUMMARY}${1}"$'\n'; }
+
+send_telegram() {
+  local text="$1"
+  local max=3500
+  # Telegram/our own cap: trim to max bytes and flag if we cut anything.
+  if [ "$(printf '%s' "$text" | wc -c)" -gt "$max" ]; then
+    text="$(printf '%s' "$text" | head -c $((max - 80)))"
+    text="${text}"$'\n\n'"… ✂️ <i>truncated — 3500-byte limit exceeded</i>"
   fi
+  curl -s -m 15 -X POST \
+    "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+    -d chat_id="${CHAT_ID}" \
+    -d parse_mode="HTML" \
+    -d disable_web_page_preview="true" \
+    --data-urlencode text="${text}" >> "$LOG" 2>&1
+}
+
+# Guarantee a summary is sent even if the script dies unexpectedly.
+sent=0
+finish() {
+  if [ "$sent" -eq 0 ]; then
+    sent=1
+    send_telegram "$SUMMARY"
+  fi
+  log "=== wifi cert connection test END (status=$(cat "$STATUS" 2>/dev/null)) ==="
+}
+trap finish EXIT
+
+ip4_of() {
+  nmcli -t -f IP4.ADDRESS connection show "$1" 2>/dev/null | head -1 | cut -d: -f2
+}
+
+restore_mgmt() {
+  log "falling back to: $MGMT_CON"
+  nmcli connection down "$CERT_CON" >> "$LOG" 2>&1
+  nmcli connection delete "$CERT_CON" >> "$LOG" 2>&1
+  nmcli connection up "$MGMT_CON" >> "$LOG" 2>&1
+}
+
+wait_internet() {
+  # Poll until the fallback link can reach the internet again.
+  local i
+  for i in $(seq 1 "$RESTORE_WAIT"); do
+    if ping -c 1 -W 2 "$PING_TARGET" >> "$LOG" 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 log "=== wifi cert connection test START ==="
-log "cert connection: $CERT_CON | management connection: $MGMT_CON | timeout: ${TIMEOUT}s"
+log "cert=$CERT_CON fallback=$MGMT_CON timeout=${TIMEOUT}s ping=$PING_TARGET"
 
-# Kick off activation in the background; this is what drops the mgmt Wi-Fi.
+add "📶 <b>Cert Wi-Fi enrolment test</b>"
+add "🖥 Host: <code>${HOST}</code>"
+add "🕒 $(ts)"
+add "SSID <code>${SSID}</code> · fallback <code>${MGMT_CON}</code>"
+add ""
+
+# --- Step 1/2: try to activate the cert connection ------------------------
 log "activating $CERT_CON ..."
 nmcli connection up "$CERT_CON" >> "$LOG" 2>&1 &
 
-# Poll for the cert connection to reach the 'activated' state (EAP-TLS done + IP).
 ok=0
 for i in $(seq 1 "$TIMEOUT"); do
   if nmcli -t -f NAME,STATE connection show --active 2>/dev/null \
@@ -43,18 +108,48 @@ for i in $(seq 1 "$TIMEOUT"); do
   sleep 1
 done
 
-if [ "$ok" -eq 1 ]; then
-  ip4="$(nmcli -t -f IP4.ADDRESS connection show "$CERT_CON" 2>/dev/null | head -1)"
-  log "SUCCESS: $CERT_CON activated (EAP-TLS authenticated). IP: ${ip4:-unknown}"
-  echo "SUCCESS" > "$STATUS"
-  # Keep the validated cert profile, but return to mgmt Wi-Fi so SSH works.
-  restore_mgmt
-else
-  log "FAIL: $CERT_CON did not activate within ${TIMEOUT}s — rolling back"
-  nmcli connection down "$CERT_CON" >> "$LOG" 2>&1
-  nmcli connection delete "$CERT_CON" >> "$LOG" 2>&1
+if [ "$ok" -ne 1 ]; then
+  # --- Step 3a: never associated -> fall back ----------------------------
+  log "FAIL: $CERT_CON did not activate within ${TIMEOUT}s"
   echo "FAIL" > "$STATUS"
+  add "❌ Did not associate to <code>${SSID}</code> within ${TIMEOUT}s"
   restore_mgmt
+  if wait_internet; then
+    add "🔄 Fell back to <code>${MGMT_CON}</code> — internet OK"
+  else
+    add "🔄 Fell back to <code>${MGMT_CON}</code> — ⚠️ internet not confirmed"
+  fi
+  add ""
+  add "<b>Result: FAILED</b> (profile rolled back)"
+  exit 0
 fi
 
-log "=== wifi cert connection test END (status=$(cat "$STATUS" 2>/dev/null)) ==="
+# --- Associated: report and run the ping test -----------------------------
+ip4="$(ip4_of "$CERT_CON")"
+log "associated to $SSID, IP ${ip4:-unknown} — running ping test"
+add "✅ Associated to <code>${SSID}</code> (EAP-TLS OK)"
+add "    IP <code>${ip4:-unknown}</code>"
+
+if ping -c "$PING_COUNT" -W 2 "$PING_TARGET" >> "$LOG" 2>&1; then
+  # --- Step 4 success: ping OK -> STAY on cert ---------------------------
+  log "SUCCESS: ping $PING_TARGET OK — staying on $CERT_CON"
+  echo "SUCCESS" > "$STATUS"
+  add "🌐 Ping ${PING_TARGET}: OK"
+  add ""
+  add "✅ <b>Result: connected to <code>${SSID}</code> — staying.</b>"
+  exit 0
+fi
+
+# --- Step 4 fallback: associated but no internet -> fall back -------------
+log "ping $PING_TARGET FAILED — rolling back"
+echo "FALLBACK" > "$STATUS"
+add "🌐 Ping ${PING_TARGET}: ❌ failed"
+restore_mgmt
+if wait_internet; then
+  add "🔄 Fell back to <code>${MGMT_CON}</code> — internet OK"
+else
+  add "🔄 Fell back to <code>${MGMT_CON}</code> — ⚠️ internet not confirmed"
+fi
+add ""
+add "<b>Result: FALLBACK</b> (cert had no internet, profile rolled back)"
+exit 0

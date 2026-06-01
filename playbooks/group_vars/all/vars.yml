@@ -1,11 +1,16 @@
 ---
 # Non-sensitive defaults shared by all wifi_clients.
 # Org-specific and sensitive values (SCEP URL, CA names, challenge password,
-# Wi-Fi SSID, certificate subject fields) live in vault.yml (encrypted).
+# Wi-Fi SSID, certificate subject, Telegram credentials) live in vault.yml.
 
 # Connection-test tuning — adjust if your network is slow to associate.
-wifi_connect_timeout: 40   # seconds to wait for EAP-TLS to complete
-wifi_failsafe_delay: 90    # seconds until the failsafe forces management Wi-Fi back
+wifi_connect_timeout: 30   # seconds to wait for the cert connection to activate
+wifi_failsafe_delay: 120   # seconds until the failsafe forces the fallback Wi-Fi back
+
+# Internet reachability check after associating to the cert SSID.
+wifi_ping_target: "8.8.8.8"
+wifi_ping_count: 3
+wifi_internet_restore_wait: 30   # 2s steps to wait for internet on fallback
 
 # PMF (Protected Management Frames): 2 = optional, compatible with WPA2 and WPA3.
 wifi_pmf: 2

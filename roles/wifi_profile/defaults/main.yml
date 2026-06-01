@@ -21,9 +21,19 @@ wifi_identity: "{{ ansible_facts['hostname'] }}-wifi"
 wifi_key_mgmt: "wpa-eap"
 
 # Timeouts and paths — tune via group_vars/all/vars.yml.
-wifi_connect_timeout: 40
-wifi_failsafe_delay: 90
+wifi_connect_timeout: 30     # seconds to wait for the cert connection to activate
+wifi_failsafe_delay: 120     # seconds until the failsafe forces fallback Wi-Fi back
 wifi_pmf: 2
+
+# Internet reachability check after associating to the cert SSID. If the ping
+# fails the host falls back to the previous Wi-Fi; if it succeeds it stays.
+wifi_ping_target: "8.8.8.8"
+wifi_ping_count: 3
+# How long (in 2s steps) to wait for internet to recover on the fallback link.
+wifi_internet_restore_wait: 30
+
+# Telegram notification credentials come from the vault:
+#   telegram_bot_token, telegram_chat_id
 
 wifi_test_script: "/usr/local/sbin/wifi-cert-test.sh"
 wifi_failsafe_script: "/usr/local/sbin/wifi-cert-failsafe.sh"

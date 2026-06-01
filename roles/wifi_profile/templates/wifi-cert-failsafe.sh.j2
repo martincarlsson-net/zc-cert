@@ -1,13 +1,20 @@
 #!/bin/bash
-# Failsafe: unconditionally restore the management Wi-Fi.
-# Managed by Ansible (wifi_profile role) — do not edit by hand.
+# Failsafe: restore the fallback Wi-Fi unless the test deliberately stayed on
+# the cert connection. Managed by Ansible (wifi_profile role) — do not edit.
 #
 # Scheduled to run shortly after the connection test starts, as insurance: if
 # the test script ever dies without restoring connectivity, this brings the
-# management Wi-Fi back so the host is never stranded off the network.
+# fallback Wi-Fi back so the host is never stranded. When the test succeeded
+# (status SUCCESS) the host is intentionally on the cert network, so leave it.
 set -u
 MGMT_CON="{{ wifi_mgmt_con }}"
+STATUS="{{ wifi_test_status }}"
 LOG="{{ wifi_test_log }}"
+
+if [ "$(cat "$STATUS" 2>/dev/null)" = "SUCCESS" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') failsafe: status SUCCESS, staying on cert" >> "$LOG"
+  exit 0
+fi
 
 for attempt in 1 2 3 4 5; do
   if nmcli -t -f NAME,STATE connection show --active 2>/dev/null \

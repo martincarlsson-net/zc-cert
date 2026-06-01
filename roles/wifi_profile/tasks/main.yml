@@ -1,11 +1,15 @@
 ---
 # wifi_profile role
-# Deploys an 802.1X/EAP-TLS NetworkManager profile for the "cert" SSID using
-# the certificate enrolled by scep_enroll, then tests the connection with a
-# 40s timeout and automatic rollback. The test runs DETACHED because bringing
-# up the cert Wi-Fi drops the management Wi-Fi (same radio) and thus the SSH
-# link Ansible is using; a failsafe guarantees the host returns to management
-# Wi-Fi no matter what.
+# Deploys an 802.1X/EAP-TLS NetworkManager profile for the cert SSID using the
+# certificate enrolled by scep_enroll, then tests it:
+#   - associate (up to wifi_connect_timeout seconds)
+#   - if associated, ping wifi_ping_target to confirm internet
+#   - ping OK  -> STAY on the cert network
+#   - ping bad or never associated -> fall back to the previous Wi-Fi
+# A Telegram summary is sent at the end (credentials from the vault).
+# The test runs DETACHED because switching Wi-Fi on the same radio drops the
+# fallback link (and any SSH session); a failsafe restores the fallback Wi-Fi
+# unless the test deliberately stayed on the cert network.
 
 - name: Ensure NetworkManager is installed
   package:
@@ -156,17 +160,15 @@
     {{ wifi_test_script }}
   changed_when: true
 
-# Switching Wi-Fi drops SSH; wait for it to come back once the test restores
-# the management Wi-Fi (or the failsafe does).
-- name: Wait for SSH to recover after the Wi-Fi flap
-  wait_for_connection:
-    delay: "{{ wifi_connect_timeout }}"
-    timeout: "{{ wifi_failsafe_delay + 120 }}"
-
-# --- Report the result ----------------------------------------------------
-- name: Read the connection-test result
+# The detached test runs asynchronously and may move us onto the cert network;
+# poll its status file (connection-agnostic) until it reaches a terminal state.
+# SUCCESS = staying on cert, FALLBACK/FAIL = rolled back to the fallback Wi-Fi.
+- name: Wait for the detached connection test to finish
   command: "cat {{ wifi_test_status }}"
   register: wifi_test_result
+  until: wifi_test_result.stdout is not search('PENDING')
+  retries: 40
+  delay: 5
   changed_when: false
 
 - name: Read the connection-test log
@@ -182,4 +184,5 @@
   debug:
     msg: >-
       Cert Wi-Fi connection test result: {{ wifi_test_result.stdout | trim }}.
-      {% if wifi_test_result.stdout is search('FAIL') %}The profile was rolled back (deleted).{% else %}The profile is retained.{% endif %}
+      {% if wifi_test_result.stdout is search('SUCCESS') %}Connected to the cert SSID with internet — staying on it.{% else %}The profile was rolled back and the host fell back to the previous Wi-Fi.{% endif %}
+      A Telegram summary was sent.
