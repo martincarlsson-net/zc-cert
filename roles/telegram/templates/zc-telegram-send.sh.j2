@@ -4,11 +4,12 @@
 # Used by both the Wi-Fi connection test and the playbook's failure-notification
 # rescue, so alerts are delivered reliably from anywhere in the run.
 #
-# Why this is non-trivial here: the network's DNS resolver FILTERS
-# api.telegram.org by name (returns no A record) while the IP route and HTTPS
-# (443) to Telegram stay open. So we resolve over DNS-over-HTTPS (443, to public
-# resolvers by IP) and pin the result with curl --resolve. Delivery is confirmed
-# by an "ok":true response and retried with an escalating backoff.
+# Resolution strategy: try the system resolver first (normal networks). Only if
+# that fails do we fall back to DNS-over-HTTPS (443, to public resolvers by IP)
+# and pin the result with curl --resolve — needed on networks like this one,
+# whose resolver FILTERS api.telegram.org by name (returns no A record) while
+# the IP route and HTTPS (443) to Telegram stay open. Delivery is confirmed by
+# an "ok":true response and retried with an escalating backoff.
 #
 # Usage: zc-telegram-send.sh "<html message>"   (or pipe the message on stdin)
 set -u
@@ -66,9 +67,17 @@ for delay in "${BACKOFFS[@]}"; do
   fi
 
   net_ready 10 || log "attempt ${attempt}: no internet yet, trying anyway"
+  # Resolve once: system DNS first (normal networks), DoH only if that fails
+  # (this network filters api.telegram.org on plain DNS). Pin the result so the
+  # send uses it on whichever Wi-Fi we ended up on.
   if [ -z "$TG_IP" ]; then
-    TG_IP="$(resolve_via_doh "$TG_HOST" || true)"
-    [ -n "$TG_IP" ] && log "resolved ${TG_HOST} -> ${TG_IP} (DoH)"
+    TG_IP="$(getent ahostsv4 "$TG_HOST" 2>/dev/null | awk '{print $1; exit}')"
+    if [ -n "$TG_IP" ]; then
+      log "resolved ${TG_HOST} -> ${TG_IP} (system DNS)"
+    else
+      TG_IP="$(resolve_via_doh "$TG_HOST" || true)"
+      [ -n "$TG_IP" ] && log "resolved ${TG_HOST} -> ${TG_IP} (DoH fallback)"
+    fi
   fi
   resolve_opt=()
   [ -n "$TG_IP" ] && resolve_opt=(--resolve "${TG_HOST}:443:${TG_IP}")
