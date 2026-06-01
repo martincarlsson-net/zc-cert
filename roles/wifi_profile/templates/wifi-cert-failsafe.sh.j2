@@ -1,0 +1,21 @@
+#!/bin/bash
+# Failsafe: unconditionally restore the management Wi-Fi.
+# Managed by Ansible (wifi_profile role) — do not edit by hand.
+#
+# Scheduled to run shortly after the connection test starts, as insurance: if
+# the test script ever dies without restoring connectivity, this brings the
+# management Wi-Fi back so the host is never stranded off the network.
+set -u
+MGMT_CON="{{ wifi_mgmt_con }}"
+LOG="{{ wifi_test_log }}"
+
+for attempt in 1 2 3 4 5; do
+  if nmcli -t -f NAME,STATE connection show --active 2>/dev/null \
+       | grep -q "^${MGMT_CON}:activated"; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') failsafe: $MGMT_CON already active" >> "$LOG"
+    exit 0
+  fi
+  echo "$(date '+%Y-%m-%d %H:%M:%S') failsafe attempt $attempt: bringing up $MGMT_CON" >> "$LOG"
+  nmcli connection up "$MGMT_CON" >> "$LOG" 2>&1
+  sleep 15
+done

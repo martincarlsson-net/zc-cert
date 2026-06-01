@@ -1,0 +1,4 @@
+---
+# Rebuilds the consolidated system trust store after the CA anchor certs change.
+- name: Update CA trust
+  command: update-ca-trust

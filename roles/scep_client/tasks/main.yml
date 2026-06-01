@@ -1,0 +1,96 @@
+---
+# scep_client role
+# Prepares a Linux host to enrol certificates from FortiAuthenticator (zitfac)
+# over SCEP using certmonger:
+#   1. installs/starts certmonger
+#   2. deploys the Carasent CA trust chain
+#   3. installs a certmonger-scoped OpenSSL config that re-enables SHA-1
+#      signature verification (the FAC signs SCEP responses with SHA-1 while
+#      the system-wide crypto policy stays strict)
+#   4. registers the SCEP CA with a wrapper helper that ties it all together
+
+- name: Install certmonger (the SCEP enrolment client)
+  package:
+    name: certmonger
+    state: present
+
+- name: Enable and start the certmonger service
+  service:
+    name: certmonger
+    state: started
+    enabled: true
+
+# --- CA trust chain --------------------------------------------------------
+# The issuing CA signs the device certs; the root anchors the chain and is used
+# to verify the SCEP response signer. Both are placed in the system trust store.
+- name: Deploy Carasent CA certificates to the system trust anchors
+  copy:
+    src: "{{ item }}"
+    dest: "{{ scep_anchor_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "{{ scep_issuing_ca_file }}"
+    - "{{ scep_root_ca_file }}"
+  notify: Update CA trust
+
+# Rebuild the trust store immediately so it is current before the getcert calls.
+- name: Rebuild the system trust store now if CA certs changed
+  meta: flush_handlers
+
+# --- SHA-1-scoped OpenSSL config ------------------------------------------
+# Fedora's default crypto policy blocks SHA-1 signature verification, but the
+# FAC signs SCEP responses with SHA-1. Instead of weakening the whole system,
+# certmonger gets its own OpenSSL config (used only via the wrapper below).
+- name: Ensure the certmonger config directory exists
+  file:
+    path: "{{ certmonger_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the SHA-1-allowing OpenSSL crypto backend (certmonger only)
+  copy:
+    src: opensslcnf-sha1.config
+    dest: "{{ openssl_sha1_backend }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the certmonger-scoped OpenSSL config
+  copy:
+    src: openssl-sha1.cnf
+    dest: "{{ openssl_sha1_cnf }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- SCEP helper wrapper ---------------------------------------------------
+# Sets the scoped OPENSSL_CONF (certmonger strips it from the helper env) and
+# execs scep-submit with all the static SCEP parameters. See the template for
+# what each flag does.
+- name: Install the SCEP submit wrapper helper
+  template:
+    src: scep-submit-carasent.j2
+    dest: "{{ scep_helper_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+# --- Register the SCEP CA with certmonger ----------------------------------
+- name: List CAs already known to certmonger
+  command: getcert list-cas
+  register: scep_ca_list
+  changed_when: false
+
+# Use add-ca (not add-scep-ca): only add-ca accepts a custom helper via -e,
+# which is how we inject the wrapper. certmonger still drives the full SCEP
+# flow (GetCACaps/GetCACert/PKCSReq) through the wrapper.
+- name: Register the FortiAuthenticator SCEP CA via the wrapper helper
+  command: >
+    getcert add-ca
+    -c "{{ scep_ca_name }}"
+    -e "{{ scep_helper_path }}"
+  when: scep_ca_name not in scep_ca_list.stdout

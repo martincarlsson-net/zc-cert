@@ -1,0 +1,22 @@
+---
+# Org-specific values (scep_url, scep_ca_name, scep_ca_identifier) must be
+# provided via group_vars/all/vault.yml — they are not set here so the role
+# fails loudly if the vault is missing rather than silently using wrong values.
+
+# CA certificates shipped with the role and deployed to the system trust store.
+scep_issuing_ca_file: "carasent_fortiauth_issuing.crt"
+scep_root_ca_file: "carasent_fortiauth_root.crt"
+scep_anchor_dir: "/etc/pki/ca-trust/source/anchors"
+
+# Certificate used to verify the SCEP response signer's chain (scep-submit -N).
+scep_signing_ca_cert: "/etc/pki/ca-trust/source/anchors/carasent_fortiauth_root.crt"
+
+# System TLS CA bundle used to verify the HTTPS connection to the FAC (-R).
+scep_tls_ca_bundle: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+
+# certmonger SCEP helper wrapper and its scoped OpenSSL config (SHA-1 allowance).
+scep_submit_bin: "/usr/libexec/certmonger/scep-submit"
+scep_helper_path: "/usr/local/bin/scep-submit-carasent"
+certmonger_conf_dir: "/etc/certmonger"
+openssl_sha1_cnf: "/etc/certmonger/openssl-sha1.cnf"
+openssl_sha1_backend: "/etc/certmonger/opensslcnf-sha1.config"

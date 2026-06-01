@@ -1,0 +1,13 @@
+# certmonger-scoped OpenSSL configuration.
+#
+# Pulls in the full system OpenSSL config, then repoints the crypto_policy
+# section at a backend that re-enables SHA-1 signature verification. Only
+# processes that set OPENSSL_CONF to this file (i.e. the certmonger SCEP
+# helper) get the SHA-1 allowance; the system-wide policy stays strict.
+#
+# Needed because FortiAuthenticator signs SCEP response messages with SHA-1,
+# which modern Fedora blocks by default. Managed by Ansible (scep_client role).
+.include /etc/ssl/openssl.cnf
+
+[crypto_policy]
+.include = /etc/certmonger/opensslcnf-sha1.config

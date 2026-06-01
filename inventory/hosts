@@ -1,0 +1,4 @@
+# ansible-pull runs the playbook locally on the enrolled machine.
+# localhost with ansible_connection=local means no SSH is needed.
+[wifi_clients]
+localhost ansible_connection=local

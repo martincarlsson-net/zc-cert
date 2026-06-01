@@ -1,0 +1,23 @@
+#!/bin/bash
+# certmonger SCEP helper for the {{ scep_ca_name }} CA on FortiAuthenticator.
+# Managed by Ansible (scep_client role) — do not edit by hand.
+#
+# certmonger sanitises the environment it hands to helpers, so a systemd
+# Environment= drop-in never reaches scep-submit. We therefore export
+# OPENSSL_CONF here, pointing at a certmonger-scoped OpenSSL config that
+# re-enables SHA-1 signature verification (the FAC signs SCEP responses with
+# SHA-1; the system-wide crypto policy stays strict).
+export OPENSSL_CONF={{ openssl_sha1_cnf }}
+
+# Static SCEP parameters (certmonger appends the per-operation arguments):
+#   -u  the FAC SCEP endpoint (HTTPS, trailing slash required)
+#   -i  CA identifier, so GetCACert returns the issuing CA (the response signer)
+#   -N  root CA used to verify the response signer's certificate chain
+#   -R  system TLS bundle used to verify the HTTPS connection to the FAC
+#   -n  prefer an initial-enrolment message over the SCEP renewal message
+exec {{ scep_submit_bin }} \
+  -u {{ scep_url }} \
+  -i {{ scep_ca_identifier }} \
+  -N {{ scep_signing_ca_cert }} \
+  -R {{ scep_tls_ca_bundle }} \
+  -n "$@"

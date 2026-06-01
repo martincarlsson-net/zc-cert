@@ -1,0 +1,185 @@
+---
+# wifi_profile role
+# Deploys an 802.1X/EAP-TLS NetworkManager profile for the "cert" SSID using
+# the certificate enrolled by scep_enroll, then tests the connection with a
+# 40s timeout and automatic rollback. The test runs DETACHED because bringing
+# up the cert Wi-Fi drops the management Wi-Fi (same radio) and thus the SSH
+# link Ansible is using; a failsafe guarantees the host returns to management
+# Wi-Fi no matter what.
+
+- name: Ensure NetworkManager is installed
+  package:
+    name: NetworkManager
+    state: present
+
+- name: Ensure NetworkManager is running and enabled
+  service:
+    name: NetworkManager
+    state: started
+    enabled: true
+
+# --- Prerequisites --------------------------------------------------------
+- name: Confirm the enrolled certificate and key are present
+  stat:
+    path: "{{ item }}"
+  register: wifi_cert_files
+  loop:
+    - "{{ wifi_client_cert }}"
+    - "{{ wifi_private_key }}"
+
+- name: Fail if the certificate or key is missing (run scep_enroll first)
+  assert:
+    that: wifi_cert_files.results | map(attribute='stat.exists') | list is all
+    fail_msg: >-
+      Missing {{ wifi_client_cert }} or {{ wifi_private_key }}.
+      The scep_enroll role must run successfully before deploying the Wi-Fi profile.
+
+# The EAP server cert (CN=fac.zitac.net) is signed by zitac_fortiauth_root, so
+# the client must trust that CA to validate the RADIUS server during EAP-TLS.
+- name: Deploy the EAP server CA to the system trust anchors
+  copy:
+    src: "{{ wifi_eap_server_ca_file }}"
+    dest: "{{ wifi_ca_cert }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: wifi_eap_ca_deploy
+
+- name: Rebuild the system trust store if the EAP server CA changed
+  command: update-ca-trust
+  when: wifi_eap_ca_deploy is changed
+  changed_when: true
+
+# --- Identify the management Wi-Fi (so we can restore it after the test) ---
+- name: Detect the currently active Wi-Fi connection (our management link)
+  shell: >-
+    nmcli -t -f NAME,TYPE,DEVICE connection show --active
+    | awk -F: '$2 == "802-11-wireless" {print $1; exit}'
+  register: wifi_mgmt_detect
+  changed_when: false
+
+- name: Record the management Wi-Fi connection name
+  set_fact:
+    wifi_mgmt_con: "{{ wifi_mgmt_detect.stdout | trim }}"
+
+- name: Fail if no active management Wi-Fi was found
+  assert:
+    that: wifi_mgmt_con | length > 0
+    fail_msg: >-
+      Could not determine the active Wi-Fi connection to restore after testing.
+      Refusing to proceed — would risk stranding the host off the network.
+
+- name: Report the management Wi-Fi that will be restored after the test
+  debug:
+    msg: "Management Wi-Fi to restore after the cert test: '{{ wifi_mgmt_con }}'"
+
+# --- Build the EAP-TLS profile --------------------------------------------
+# Recreate from scratch each run for a deterministic, idempotent result.
+- name: Remove any pre-existing cert Wi-Fi profile
+  command: nmcli connection delete "{{ wifi_con_name }}"
+  register: wifi_profile_delete
+  changed_when: "'successfully deleted' in wifi_profile_delete.stdout"
+  failed_when: false
+
+- name: Create the 802.1X/EAP-TLS Wi-Fi profile for the cert SSID
+  command: >
+    nmcli connection add type wifi
+    con-name "{{ wifi_con_name }}"
+    ssid "{{ wifi_ssid }}"
+    connection.autoconnect no
+    wifi-sec.key-mgmt "{{ wifi_key_mgmt }}"
+    wifi-sec.pmf {{ wifi_pmf }}
+    802-1x.eap tls
+    802-1x.identity "{{ wifi_identity }}"
+    802-1x.client-cert "{{ wifi_client_cert }}"
+    802-1x.private-key "{{ wifi_private_key }}"
+    802-1x.private-key-password-flags 4
+    802-1x.ca-cert "{{ wifi_ca_cert }}"
+  register: wifi_profile_add
+  changed_when: true
+
+# --- Validate the profile was created -------------------------------------
+- name: Validate the cert Wi-Fi profile exists and is well-formed
+  command: nmcli -t -f 802-1x.eap,802-1x.client-cert connection show "{{ wifi_con_name }}"
+  register: wifi_profile_check
+  changed_when: false
+
+- name: Confirm the profile uses EAP-TLS with the enrolled certificate
+  assert:
+    that:
+      - "'tls' in wifi_profile_check.stdout"
+      - "wifi_client_cert in wifi_profile_check.stdout"
+    fail_msg: "The cert Wi-Fi profile was not created correctly: {{ wifi_profile_check.stdout }}"
+
+# --- Deploy the detached test + failsafe scripts --------------------------
+- name: Deploy the detached connection-test script
+  template:
+    src: wifi-cert-test.sh.j2
+    dest: "{{ wifi_test_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the management-Wi-Fi failsafe script
+  template:
+    src: wifi-cert-failsafe.sh.j2
+    dest: "{{ wifi_failsafe_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Reset the previous test status marker
+  copy:
+    dest: "{{ wifi_test_status }}"
+    content: "PENDING\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- Run the test detached, then recover the SSH connection ---------------
+# Failsafe first: force the management Wi-Fi back after wifi_failsafe_delay,
+# independent of the test, so the host can never be left stranded.
+- name: Schedule the management-Wi-Fi failsafe (transient systemd timer)
+  command: >
+    systemd-run --collect
+    --on-active={{ wifi_failsafe_delay }}
+    --unit=wifi-cert-failsafe
+    {{ wifi_failsafe_script }}
+  changed_when: true
+
+# The test itself runs as a transient unit so it survives the SSH drop caused
+# by switching Wi-Fi networks.
+- name: Launch the detached cert connection test
+  command: >
+    systemd-run --collect
+    --unit=wifi-cert-test
+    {{ wifi_test_script }}
+  changed_when: true
+
+# Switching Wi-Fi drops SSH; wait for it to come back once the test restores
+# the management Wi-Fi (or the failsafe does).
+- name: Wait for SSH to recover after the Wi-Fi flap
+  wait_for_connection:
+    delay: "{{ wifi_connect_timeout }}"
+    timeout: "{{ wifi_failsafe_delay + 120 }}"
+
+# --- Report the result ----------------------------------------------------
+- name: Read the connection-test result
+  command: "cat {{ wifi_test_status }}"
+  register: wifi_test_result
+  changed_when: false
+
+- name: Read the connection-test log
+  command: "cat {{ wifi_test_log }}"
+  register: wifi_test_logout
+  changed_when: false
+
+- name: Show the connection-test log
+  debug:
+    msg: "{{ wifi_test_logout.stdout_lines }}"
+
+- name: Report the connection-test outcome
+  debug:
+    msg: >-
+      Cert Wi-Fi connection test result: {{ wifi_test_result.stdout | trim }}.
+      {% if wifi_test_result.stdout is search('FAIL') %}The profile was rolled back (deleted).{% else %}The profile is retained.{% endif %}

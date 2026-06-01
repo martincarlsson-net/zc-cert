@@ -1,0 +1,12 @@
+---
+# scep_ca_name, scep_challenge_password, cert_org, and cert_country are
+# provided via group_vars/all/vault.yml — set there, not here.
+
+# Where the issued key and certificate are stored on the client.
+cert_key_path: "/etc/pki/tls/private/scep-wifi.key"
+cert_path: "/etc/pki/tls/certs/scep-wifi.crt"
+
+# Certificate subject. CN uses the host's own hostname; O and C must match the
+# FAC wildcard enrolment policy (set via vault cert_org / cert_country).
+cert_subject_cn: "{{ ansible_hostname }}-wifi"
+cert_subject: "CN={{ cert_subject_cn }},O={{ cert_org }},C={{ cert_country }}"

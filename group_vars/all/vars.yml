@@ -1,0 +1,11 @@
+---
+# Non-sensitive defaults shared by all wifi_clients.
+# Org-specific and sensitive values (SCEP URL, CA names, challenge password,
+# Wi-Fi SSID, certificate subject fields) live in vault.yml (encrypted).
+
+# Connection-test tuning — adjust if your network is slow to associate.
+wifi_connect_timeout: 40   # seconds to wait for EAP-TLS to complete
+wifi_failsafe_delay: 90    # seconds until the failsafe forces management Wi-Fi back
+
+# PMF (Protected Management Frames): 2 = optional, compatible with WPA2 and WPA3.
+wifi_pmf: 2

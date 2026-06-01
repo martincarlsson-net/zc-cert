@@ -1,0 +1,60 @@
+#!/bin/bash
+# Detached Wi-Fi connection test with automatic rollback.
+# Managed by Ansible (wifi_profile role) — do not edit by hand.
+#
+# Runs independently of the SSH/Ansible session because activating the "cert"
+# Wi-Fi drops the management Wi-Fi on the same radio (and thus the SSH link).
+# It tries to bring up the cert connection, waits up to {{ wifi_connect_timeout }}s,
+# and ALWAYS restores the management connection afterward so the host stays
+# remotely reachable. On failure it also deletes the cert profile (rollback).
+set -u
+
+CERT_CON="{{ wifi_con_name }}"
+MGMT_CON="{{ wifi_mgmt_con }}"
+TIMEOUT={{ wifi_connect_timeout }}
+LOG="{{ wifi_test_log }}"
+STATUS="{{ wifi_test_status }}"
+
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+log() { echo "$(ts) $*" >> "$LOG"; }
+
+restore_mgmt() {
+  if [ -n "$MGMT_CON" ]; then
+    log "restoring management connection: $MGMT_CON"
+    nmcli connection up "$MGMT_CON" >> "$LOG" 2>&1
+  fi
+}
+
+log "=== wifi cert connection test START ==="
+log "cert connection: $CERT_CON | management connection: $MGMT_CON | timeout: ${TIMEOUT}s"
+
+# Kick off activation in the background; this is what drops the mgmt Wi-Fi.
+log "activating $CERT_CON ..."
+nmcli connection up "$CERT_CON" >> "$LOG" 2>&1 &
+
+# Poll for the cert connection to reach the 'activated' state (EAP-TLS done + IP).
+ok=0
+for i in $(seq 1 "$TIMEOUT"); do
+  if nmcli -t -f NAME,STATE connection show --active 2>/dev/null \
+       | grep -q "^${CERT_CON}:activated"; then
+    ok=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$ok" -eq 1 ]; then
+  ip4="$(nmcli -t -f IP4.ADDRESS connection show "$CERT_CON" 2>/dev/null | head -1)"
+  log "SUCCESS: $CERT_CON activated (EAP-TLS authenticated). IP: ${ip4:-unknown}"
+  echo "SUCCESS" > "$STATUS"
+  # Keep the validated cert profile, but return to mgmt Wi-Fi so SSH works.
+  restore_mgmt
+else
+  log "FAIL: $CERT_CON did not activate within ${TIMEOUT}s — rolling back"
+  nmcli connection down "$CERT_CON" >> "$LOG" 2>&1
+  nmcli connection delete "$CERT_CON" >> "$LOG" 2>&1
+  echo "FAIL" > "$STATUS"
+  restore_mgmt
+fi
+
+log "=== wifi cert connection test END (status=$(cat "$STATUS" 2>/dev/null)) ==="

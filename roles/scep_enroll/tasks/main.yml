@@ -1,0 +1,68 @@
+---
+# scep_enroll role
+# Requests a device certificate from FortiAuthenticator via certmonger and the
+# SCEP CA registered by the scep_client role, then waits for it to be issued.
+
+- name: Fail early if no SCEP challenge password was supplied
+  assert:
+    that: scep_challenge_password | length > 0
+    fail_msg: >-
+      scep_challenge_password is empty. Ensure group_vars/all/vault.yml is
+      present and decrypted (--ask-vault-pass or --vault-password-file).
+      You can also override at runtime with -e scep_challenge_password=<password>.
+
+- name: Ensure certificate output directories exist with correct permissions
+  file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/pki/tls/private, mode: "0700" }
+    - { path: /etc/pki/tls/certs,   mode: "0755" }
+
+# Idempotency guard: only enrol if certmonger isn't already monitoring the cert.
+- name: Check whether certmonger already tracks this certificate
+  command: getcert list -f "{{ cert_path }}"
+  register: scep_cert_check
+  failed_when: false
+  changed_when: false
+
+- name: Request the device certificate over SCEP
+  command: >
+    getcert request
+    -c "{{ scep_ca_name }}"
+    -k "{{ cert_key_path }}"
+    -f "{{ cert_path }}"
+    -N "{{ cert_subject }}"
+    -L "{{ scep_challenge_password }}"
+  when: "'status: MONITORING' not in scep_cert_check.stdout"
+  register: scep_cert_request
+
+# certmonger enrols asynchronously; poll until it reaches a terminal state.
+- name: Wait for the certificate to reach a terminal state (up to 60s)
+  command: getcert list -f "{{ cert_path }}"
+  register: scep_cert_status
+  until: >
+    'status: MONITORING' in scep_cert_status.stdout or
+    'status: CA_REJECTED' in scep_cert_status.stdout or
+    'status: CA_UNREACHABLE' in scep_cert_status.stdout
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: scep_cert_request is changed
+
+- name: Read the final certificate status
+  command: getcert list -f "{{ cert_path }}"
+  register: scep_cert_final
+  changed_when: false
+
+- name: Show certificate status
+  debug:
+    msg: "{{ scep_cert_final.stdout_lines }}"
+
+- name: Fail if the certificate did not reach MONITORING
+  assert:
+    that: "'status: MONITORING' in scep_cert_final.stdout"
+    fail_msg: "SCEP enrolment did not reach MONITORING — see the status above."

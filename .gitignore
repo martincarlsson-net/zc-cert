@@ -1,0 +1,13 @@
+# Secrets — never commit
+*.env
+secrets.*
+*.key
+*.pem
+*.retry
+
+# Local ansible state
+*.log
+
+# Editor / OS
+.DS_Store
+*.swp
