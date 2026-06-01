@@ -34,6 +34,12 @@ wifi_internet_restore_wait: 30
 
 # Telegram notification credentials come from the vault:
 #   telegram_bot_token, telegram_chat_id
+#
+# Delivery is critical (especially for new enrolments), so the send is retried
+# with an escalating backoff and only counts as delivered on an "ok":true
+# response. These are the wait times (seconds) BEFORE each attempt — the first
+# is immediate. Default: now, +30s, +60s, +60s, +120s (~4.5 min, 5 attempts).
+telegram_backoffs: "0 30 60 60 120"
 
 wifi_test_script: "/usr/local/sbin/wifi-cert-test.sh"
 wifi_failsafe_script: "/usr/local/sbin/wifi-cert-failsafe.sh"
