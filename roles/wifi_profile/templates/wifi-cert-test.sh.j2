@@ -98,11 +98,7 @@ add ""
 if [ -f /var/log/zc-enroll.status ]; then
   _enrolled=$(grep '^ENROLLED=' /var/log/zc-enroll.status | cut -d= -f2-)
   _subject=$(grep '^SUBJECT='  /var/log/zc-enroll.status | cut -d= -f2-)
-  _expires=$(grep '^EXPIRES='  /var/log/zc-enroll.status | cut -d= -f2-)
-  _issuer=$(grep  '^ISSUER='   /var/log/zc-enroll.status | cut -d= -f2-)
   add "Cert: <code>${_subject}</code>"
-  add "Expires: <code>${_expires}</code>"
-  add "Issuer: <code>${_issuer}</code>"
   if [ "$_enrolled" = "NEW" ]; then
     add "Enrolment: new certificate issued"
   else
