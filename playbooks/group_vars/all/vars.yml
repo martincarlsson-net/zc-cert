@@ -15,6 +15,12 @@ wifi_internet_restore_wait: 30   # 2s steps to wait for internet on fallback
 # PMF (Protected Management Frames): 2 = optional, compatible with WPA2 and WPA3.
 wifi_pmf: 2
 
+# State files written by the connection test and enrolment roles. Defined here
+# (not only in role defaults) so the playbook-level reset task can reference
+# wifi_test_status before any role has been loaded.
+wifi_test_status: "/var/log/wifi-cert-test.status"
+wifi_test_log:    "/var/log/wifi-cert-test.log"
+
 # Telegram notification (sender script shared by the test and the rescue block).
 # Credentials (telegram_bot_token, telegram_chat_id) come from vault.yml.
 telegram_send_script: "/usr/local/sbin/zc-telegram-send.sh"
