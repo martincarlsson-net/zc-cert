@@ -15,7 +15,7 @@ wifi_eap_server_ca_file: "zitac_fortiauth_root.crt"
 wifi_ca_cert: "/etc/pki/ca-trust/source/anchors/zitac_fortiauth_root.crt"
 
 # EAP-TLS outer identity sent to the RADIUS server. Matches the enrolled cert CN.
-wifi_identity: "{{ ansible_facts['hostname'] }}-wifi"
+wifi_identity: "{{ ansible_facts['hostname'] }}-wifi-{{ ansible_facts['machine_id'][-6:] }}"
 
 # WPA-Enterprise key management.
 wifi_key_mgmt: "wpa-eap"
