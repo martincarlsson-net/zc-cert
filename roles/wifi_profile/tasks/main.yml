@@ -156,7 +156,7 @@
 # Stop any leftover units from a previous run before starting new ones.
 # Without this, systemd-run fails if the unit name already exists.
 - name: Stop any leftover test or failsafe units from a previous run
-  command: systemctl stop wifi-cert-test.service wifi-cert-failsafe.service
+  command: systemctl stop wifi-cert-test.service wifi-cert-failsafe.service wifi-cert-failsafe.timer
   failed_when: false
   changed_when: false
 
