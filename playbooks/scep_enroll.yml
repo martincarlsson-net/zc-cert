@@ -51,7 +51,7 @@
               - |-
                 ❌ <b>Cert enrolment failed</b>
                 Host: <code>{{ ansible_facts['hostname'] }}</code>
-                <code>{{ ansible_date_time.date }} {{ ansible_date_time.time }}</code>
+                <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
 
                 Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
                 Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
