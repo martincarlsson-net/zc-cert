@@ -8,5 +8,5 @@ cert_path: "/etc/pki/tls/certs/scep-wifi.crt"
 
 # Certificate subject. CN combines hostname + last 6 chars of machine-id to
 # ensure uniqueness across hosts that share the same hostname.
-cert_subject_cn: "{{ ansible_facts['hostname'] }}-wifi-{{ ansible_facts['machine_id'][-6:] }}"
+cert_subject_cn: "{{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}"
 cert_subject: "CN={{ cert_subject_cn }},O={{ cert_org }},C={{ cert_country }}"
