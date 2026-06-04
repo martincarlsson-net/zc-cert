@@ -18,6 +18,10 @@ wifi_pmf: 2
 # State files written by the connection test and enrolment roles. Defined here
 # (not only in role defaults) so the playbook-level reset task can reference
 # wifi_test_status before any role has been loaded.
+# Certificate subject — OU=Linux differentiates this profile from the Intune
+# enrollment profile on FAC, allowing both to coexist under the same issuing CA.
+cert_subject: "CN={{ cert_subject_cn }},OU=Linux,O={{ cert_org }},C={{ cert_country }}"
+
 wifi_test_status: "/var/log/wifi-cert-test.status"
 wifi_test_log:    "/var/log/wifi-cert-test.log"
 
