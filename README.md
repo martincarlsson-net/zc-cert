@@ -22,9 +22,10 @@ Automates certificate enrolment and 802.1X/EAP-TLS Wi-Fi authentication on Linux
 _VAULT_PW=<vault-password>
 
 sudo dnf install -y git ansible-core && \
-echo "$_VAULT_PW" | sudo tee /root/.vault-pass > /dev/null && \
-sudo chmod 600 /root/.vault-pass && \
-sudo ansible-pull -U https://github.com/martincarlsson-net/zc-cert.git playbooks/scep_enroll.yml --vault-password-file /root/.vault-pass
+sudo mkdir -p /etc/ansible && \
+echo "$_VAULT_PW" | sudo tee /etc/ansible/.vault-pass > /dev/null && \
+sudo chmod 600 /etc/ansible/.vault-pass && \
+sudo ansible-pull -U https://github.com/martincarlsson-net/zc-cert.git playbooks/scep_enroll.yml --vault-password-file /etc/ansible/.vault-pass
 ```
 
 ## Re-running
