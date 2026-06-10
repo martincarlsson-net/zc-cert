@@ -8,5 +8,5 @@ cert_path: "/etc/pki/tls/certs/scep-wifi.crt"
 
 # Certificate subject. CN is the hostname (unique via product serial).
 # OU is the group-derived tag (resolved at runtime in tasks/main.yml).
-cert_subject_cn: "{{ ansible_facts['hostname'] }}"
-cert_subject: "CN={{ cert_subject_cn }},OU={{ scep_cert_tag }},O={{ cert_org }},C={{ cert_country }}"
+cert_subject_cn: "{{ scep_cert_tag | default('') }}"
+cert_subject: "CN={{ cert_subject_cn }},O={{ cert_org }},C={{ cert_country }}"
