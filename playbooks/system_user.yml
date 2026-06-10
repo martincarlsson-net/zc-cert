@@ -202,4 +202,3 @@
             Ready for step 4 — certificate enrolment and Wi-Fi.
       failed_when: false
       changed_when: false
-      become: true
