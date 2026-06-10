@@ -77,7 +77,7 @@
         # XDG_RUNTIME_DIR is always set by the login session for the current user.
         - name: Resolve user D-Bus session socket
           ansible.builtin.set_fact:
-            gnome_dbus: "unix:path={{ ansible_facts['env']['XDG_RUNTIME_DIR'] }}/bus"
+            gnome_dbus: "unix:path=/run/user/{{ ansible_facts['user_uid'] }}/bus"
           when: not (sleep | bool)
 
         - name: Set screen blank timeout to 30 minutes
