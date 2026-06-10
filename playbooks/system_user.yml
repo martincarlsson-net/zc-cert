@@ -182,7 +182,6 @@
                 Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
           failed_when: false
           changed_when: false
-          become: true
 
         - name: Re-raise the original failure
           fail:
