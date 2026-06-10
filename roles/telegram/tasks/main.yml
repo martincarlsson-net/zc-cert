@@ -10,7 +10,7 @@
     dest: "{{ telegram_send_script }}"
     owner: root
     group: root
-    mode: "0700"   # contains the bot token — root only
+    mode: "0711"   # execute by all users; root-only read keeps the token hidden
 
 # Create the log file with restricted permissions before anything writes to it.
 # Without this, the scripts create it with default umask (0644), which would

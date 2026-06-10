@@ -14,15 +14,6 @@
   hosts: linux_clients
   become: false
 
-  pre_tasks:
-    # The sender script lives in /usr/local/sbin (root-owned) so this block
-    # needs privilege escalation even though the rest of the play does not.
-    - block:
-        - name: Deploy Telegram notification sender
-          include_role:
-            name: telegram
-      become: true
-
   tasks:
     - block:
         - name: Refuse to run as root
@@ -138,8 +129,6 @@
                 Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
           failed_when: false
           changed_when: false
-          # Sender script is root-owned — escalate for this task only.
-          become: true
 
         - name: Re-raise the original failure
           fail:
@@ -160,4 +149,3 @@
             Ready for step 4 — certificate enrolment and Wi-Fi.
       failed_when: false
       changed_when: false
-      become: true
