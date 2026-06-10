@@ -18,6 +18,6 @@
     state: touch
     owner: root
     group: root
-    mode: "0600"
+    mode: "0666"
     modification_time: preserve
     access_time: preserve
