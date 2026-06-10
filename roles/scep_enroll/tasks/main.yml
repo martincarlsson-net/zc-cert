@@ -3,6 +3,45 @@
 # Requests a device certificate from FortiAuthenticator via certmonger and the
 # SCEP CA registered by the scep_client role, then waits for it to be issued.
 
+# Determine which user invoked sudo so we can look up their Entra ID groups.
+- name: Get invoking username
+  ansible.builtin.set_fact:
+    scep_invoking_user: "{{ ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id']) }}"
+
+- name: Get groups for invoking user
+  ansible.builtin.command:
+    cmd: "id -Gn {{ scep_invoking_user }}"
+  register: scep_user_groups
+  changed_when: false
+
+- name: Resolve cert group tag (first match wins)
+  ansible.builtin.set_fact:
+    scep_cert_tag: >-
+      {{ (cert_group_tags
+          | selectattr('group', 'in', scep_user_groups.stdout.split())
+          | map(attribute='tag')
+          | list
+          | first) }}
+  ignore_errors: true
+  register: scep_tag_result
+
+- name: Fail if user has no matching cert group
+  ansible.builtin.fail:
+    msg: >-
+      User {{ scep_invoking_user }} is not a member of any group in cert_group_tags.
+      Certificate enrollment is only permitted for users in a mapped group.
+      Current groups: {{ scep_user_groups.stdout }}
+  when: scep_tag_result is failed or scep_cert_tag == ''
+
+- name: Set CN with group tag
+  ansible.builtin.set_fact:
+    cert_subject_cn: "{{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}-{{ scep_cert_tag }}"
+    cert_subject: "CN={{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}-{{ scep_cert_tag }},OU=Linux,O={{ cert_org }},C={{ cert_country }}"
+
+- name: Show resolved CN
+  ansible.builtin.debug:
+    msg: "Enrolling certificate with CN={{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}-{{ scep_cert_tag }}"
+
 - name: Fail early if no SCEP challenge password was supplied
   assert:
     that: scep_challenge_password | length > 0
