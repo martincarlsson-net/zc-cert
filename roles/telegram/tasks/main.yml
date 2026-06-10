@@ -10,11 +10,20 @@
     dest: "{{ telegram_send_script }}"
     owner: root
     group: root
-    mode: "0711"   # execute by all users; root-only read keeps the token hidden
+    mode: "0700"   # contains the bot token — root only
 
 # Create the log file with restricted permissions before anything writes to it.
 # Without this, the scripts create it with default umask (0644), which would
 # expose API responses containing chat ID and message content to other users.
+- name: Allow any user to run the Telegram sender without a password
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/zc-telegram-send
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      ALL ALL=(root) NOPASSWD: {{ telegram_send_script }}
+
 - name: Ensure the Telegram log file exists with restricted permissions
   file:
     path: "{{ telegram_send_log }}"
