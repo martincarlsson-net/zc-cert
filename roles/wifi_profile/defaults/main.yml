@@ -13,9 +13,9 @@ wifi_private_key: "/etc/pki/tls/private/scep-wifi.key"
 wifi_eap_server_ca_file: "eap_server_ca.crt"
 wifi_ca_cert: "/etc/pki/ca-trust/source/anchors/eap_server_ca.crt"
 
-# EAP-TLS outer identity sent to the RADIUS server. Must match the enrolled
-# cert CN — derived from cert_subject_cn set by the scep_enroll role.
-wifi_identity: "{{ cert_subject_cn }}"
+# EAP-TLS outer identity sent to the RADIUS server. Matches the cert CN
+# (hostname only — group tag is now in OU, not CN).
+wifi_identity: "{{ ansible_facts['hostname'] }}"
 
 # WPA-Enterprise key management.
 wifi_key_mgmt: "wpa-eap"

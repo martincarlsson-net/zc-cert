@@ -33,14 +33,14 @@
       Current groups: {{ scep_user_groups.stdout }}
   when: scep_tag_result is failed or scep_cert_tag == ''
 
-- name: Set CN with group tag
+- name: Set subject with hostname as CN and group tag as OU
   ansible.builtin.set_fact:
-    cert_subject_cn: "{{ ansible_facts['hostname'] }}-{{ scep_cert_tag }}"
-    cert_subject: "CN={{ ansible_facts['hostname'] }}-{{ scep_cert_tag }},OU=Linux,O={{ cert_org }},C={{ cert_country }}"
+    cert_subject_cn: "{{ ansible_facts['hostname'] }}"
+    cert_subject: "CN={{ ansible_facts['hostname'] }},OU={{ scep_cert_tag }},O={{ cert_org }},C={{ cert_country }}"
 
-- name: Show resolved CN
+- name: Show resolved certificate subject
   ansible.builtin.debug:
-    msg: "Enrolling certificate with CN={{ ansible_facts['hostname'] }}-{{ scep_cert_tag }}"
+    msg: "Enrolling certificate: CN={{ ansible_facts['hostname'] }}, OU={{ scep_cert_tag }}"
 
 - name: Fail early if no SCEP challenge password was supplied
   assert:
