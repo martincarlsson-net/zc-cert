@@ -35,12 +35,12 @@
 
 - name: Set CN with group tag
   ansible.builtin.set_fact:
-    cert_subject_cn: "{{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}-{{ scep_cert_tag }}"
-    cert_subject: "CN={{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}-{{ scep_cert_tag }},OU=Linux,O={{ cert_org }},C={{ cert_country }}"
+    cert_subject_cn: "{{ ansible_facts['hostname'] }}-{{ scep_cert_tag }}"
+    cert_subject: "CN={{ ansible_facts['hostname'] }}-{{ scep_cert_tag }},OU=Linux,O={{ cert_org }},C={{ cert_country }}"
 
 - name: Show resolved CN
   ansible.builtin.debug:
-    msg: "Enrolling certificate with CN={{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}-{{ scep_cert_tag }}"
+    msg: "Enrolling certificate with CN={{ ansible_facts['hostname'] }}-{{ scep_cert_tag }}"
 
 - name: Fail early if no SCEP challenge password was supplied
   assert:
