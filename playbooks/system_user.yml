@@ -24,13 +24,13 @@
         # --- SSH defaults ----------------------------------------------------
         - name: Ensure SSH config directory exists
           ansible.builtin.file:
-            path: "{{ ansible_env.HOME }}/.ssh"
+            path: "{{ ansible_facts['env']['HOME'] }}/.ssh"
             state: directory
             mode: "0700"
 
         - name: Configure SSH keepalive defaults
           ansible.builtin.blockinfile:
-            path: "{{ ansible_env.HOME }}/.ssh/config"
+            path: "{{ ansible_facts['env']['HOME'] }}/.ssh/config"
             create: true
             mode: "0600"
             block: |
@@ -42,13 +42,13 @@
         # The RPM is installed in step 2 (root). Here we write the per-user config.
         - name: Ensure OPKSSH config directory exists
           ansible.builtin.file:
-            path: "{{ ansible_env.HOME }}/.opk"
+            path: "{{ ansible_facts['env']['HOME'] }}/.opk"
             state: directory
             mode: "0700"
 
         - name: Configure OPKSSH client config
           ansible.builtin.copy:
-            dest: "{{ ansible_env.HOME }}/.opk/config.yml"
+            dest: "{{ ansible_facts['env']['HOME'] }}/.opk/config.yml"
             mode: "0600"
             content: |
               ---
@@ -114,19 +114,19 @@
         # --- LazyVim ---------------------------------------------------------
         - name: Check if LazyVim config already exists
           ansible.builtin.stat:
-            path: "{{ ansible_env.HOME }}/.config/nvim"
+            path: "{{ ansible_facts['env']['HOME'] }}/.config/nvim"
           register: lazyvim_config_stat
 
         - name: Clone the LazyVim starter
           ansible.builtin.git:
             repo: "https://github.com/LazyVim/starter"
-            dest: "{{ ansible_env.HOME }}/.config/nvim"
+            dest: "{{ ansible_facts['env']['HOME'] }}/.config/nvim"
             update: false
           when: not lazyvim_config_stat.stat.exists
 
         - name: Remove the LazyVim .git folder
           ansible.builtin.file:
-            path: "{{ ansible_env.HOME }}/.config/nvim/.git"
+            path: "{{ ansible_facts['env']['HOME'] }}/.config/nvim/.git"
             state: absent
           when: not lazyvim_config_stat.stat.exists
 
