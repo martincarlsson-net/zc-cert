@@ -189,6 +189,13 @@
               {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
 
   post_tasks:
+    - name: Get public IP
+      ansible.builtin.uri:
+        url: https://api.ipify.org
+        return_content: true
+      register: user_public_ip
+      failed_when: false
+
     - name: Send Telegram completion notification
       command:
         argv:
@@ -197,8 +204,8 @@
             ✅ <b>System install (user) complete (step 3)</b>
             Host: <code>{{ ansible_facts['hostname'] }}</code>
             User: <code>{{ ansible_facts['user_id'] }}</code>
+            Private IP: <code>{{ ansible_facts['default_ipv4']['address'] | default('unknown') }}</code>
+            Public IP: <code>{{ user_public_ip.content | default('unknown') }}</code>
             <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
-
-            Ready for step 4 — certificate enrolment and Wi-Fi.
       failed_when: false
       changed_when: false

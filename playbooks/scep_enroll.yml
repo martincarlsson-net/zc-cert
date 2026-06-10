@@ -64,16 +64,3 @@
             msg: >-
               {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
 
-  post_tasks:
-    - name: Send Telegram completion notification
-      command:
-        argv:
-          - "{{ telegram_send_script }}"
-          - |-
-            ✅ <b>Cert enrolment + Wi-Fi complete (step 4)</b>
-            Host: <code>{{ ansible_facts['hostname'] }}</code>
-            <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
-
-            Certificate enrolled and Wi-Fi profile deployed successfully.
-      failed_when: false
-      changed_when: false

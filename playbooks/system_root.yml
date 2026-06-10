@@ -7,13 +7,17 @@
 # as your Entra ID user:
 #
 #   sudo ansible-pull -U <repo-url> playbooks/system_root.yml
+#   sudo ansible-pull -U <repo-url> playbooks/system_root.yml -e site=HQ
 #
-# Organisation-specific values (hostname prefix) come from vault.yml.
+# Site prefix defaults to GBG. Override with -e site=XXX to set a different
+# location prefix in the hostname (<site>-<product-serial>).
 - name: System install (root privilege)
   hosts: linux_clients
   become: true
   vars:
     install_vim_default_editor: false
+    # Site/location prefix used in the hostname. Override with -e site=XXX.
+    site: "GBG"
 
   pre_tasks:
     - name: Deploy Telegram notification sender
@@ -43,8 +47,7 @@
             access_time: preserve
 
         # --- Hostname -------------------------------------------------------
-        # Names the host "<hostname_prefix>-<product serial>". The prefix is an
-        # org/site code kept in vault.yml so it is not committed to this repo.
+        # Names the host "<site>-<product serial>". Pass -e site=XXX to override.
         - name: Read product serial
           ansible.builtin.command:
             cmd: cat /sys/devices/virtual/dmi/id/product_serial
@@ -52,12 +55,10 @@
           changed_when: false
           failed_when: false
 
-        - name: Set hostname from prefix + serial
+        - name: Set hostname from site + serial
           ansible.builtin.hostname:
-            name: "{{ hostname_prefix }}-{{ install_product_serial.stdout | trim }}"
-          when:
-            - hostname_prefix is defined
-            - install_product_serial.stdout | trim | length > 0
+            name: "{{ site }}-{{ install_product_serial.stdout | trim }}"
+          when: install_product_serial.stdout | trim | length > 0
 
         # --- OPKSSH client RPM (user config is done in step 3) ---------------
         - name: Install OPKSSH client RPM
@@ -446,6 +447,13 @@
               {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
 
   post_tasks:
+    - name: Get public IP
+      ansible.builtin.uri:
+        url: https://api.ipify.org
+        return_content: true
+      register: install_public_ip
+      failed_when: false
+
     - name: Send Telegram completion notification
       command:
         argv:
@@ -453,8 +461,8 @@
           - |-
             ✅ <b>System install (root) complete (step 2)</b>
             Host: <code>{{ ansible_facts['hostname'] }}</code>
+            Private IP: <code>{{ ansible_facts['default_ipv4']['address'] | default('unknown') }}</code>
+            Public IP: <code>{{ install_public_ip.content | default('unknown') }}</code>
             <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
-
-            Reboot recommended before running step 3.
       failed_when: false
       changed_when: false
