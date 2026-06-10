@@ -26,6 +26,22 @@
           ansible.builtin.set_fact:
             install_invoking_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
 
+        # --- Ansible runtime prerequisites -----------------------------------
+        # vault-pass must be world-readable so step 3 (no sudo) can decrypt.
+        # ansible.log must be world-writable so step 3 can append to it.
+        - name: Ensure vault password file is readable by all users
+          ansible.builtin.file:
+            path: /etc/ansible/.vault-pass
+            mode: "0644"
+
+        - name: Ensure ansible log file exists and is world-writable
+          ansible.builtin.file:
+            path: /var/log/ansible.log
+            state: touch
+            mode: "0666"
+            modification_time: preserve
+            access_time: preserve
+
         # --- Hostname -------------------------------------------------------
         # Names the host "<hostname_prefix>-<product serial>". The prefix is an
         # org/site code kept in vault.yml so it is not committed to this repo.
