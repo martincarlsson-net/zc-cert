@@ -10,6 +10,11 @@
 #   sudo ansible-pull -U <repo-url> playbooks/himmelblau.yml
 #   sudo ansible-pull -U <repo-url> playbooks/himmelblau.yml -e shell=zsh
 #
+# By default, himmelblau-sshd-config is installed (enables Entra ID SSH logins
+# via AuthorizedKeysCommand). If SSH access must be preserved before himmelblau
+# is fully operational, skip it with -e ssh=true:
+#   sudo ansible-pull -U <repo-url> playbooks/himmelblau.yml -e ssh=true
+#
 # The Entra ID domain(s) come from vault.yml (entra_domains) so no
 # organisation-specific value is committed to this public repo.
 - name: Configure Himmelblau on Fedora hosts
@@ -18,6 +23,9 @@
   vars:
     # Default shell for Entra ID users. Override at runtime with -e shell=zsh.
     shell: "bash"
+    # Set to true to skip himmelblau-sshd-config and leave sshd untouched.
+    # Useful when SSH access must be preserved before himmelblau is configured.
+    ssh: false
     # Primary tenant domain(s) — sourced from vault.yml, not hard-coded.
     himmelblau_domains: "{{ entra_domains }}"
     himmelblau_hsm_type: tpm_bound_soft_if_possible
@@ -66,12 +74,17 @@
               - himmelblau
               - pam-himmelblau
               - nss-himmelblau
-              - himmelblau-sshd-config
               - himmelblau-qr-greeter
               - himmelblau-sso
               - o365
               - himmelblau-selinux
             state: present
+
+        - name: Install himmelblau sshd config (enables Entra ID SSH logins)
+          ansible.builtin.dnf:
+            name: himmelblau-sshd-config
+            state: present
+          when: not (ssh | bool)
 
         - name: Check TPM functionality via tpm2_getcap
           ansible.builtin.command:
