@@ -68,6 +68,12 @@
             cmd: dnf -y makecache
           changed_when: false
 
+        - name: Remove cached himmelblau RPMs to avoid stale GPG failures
+          ansible.builtin.shell:
+            cmd: find /var/cache/libdnf5 -path '*/himmelblau*/packages/*.rpm' -delete
+          changed_when: false
+          failed_when: false
+
         - name: Install himmelblau packages
           ansible.builtin.dnf:
             name:
