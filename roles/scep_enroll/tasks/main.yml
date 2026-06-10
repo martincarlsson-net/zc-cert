@@ -3,10 +3,11 @@
 # Requests a device certificate from FortiAuthenticator via certmonger and the
 # SCEP CA registered by the scep_client role, then waits for it to be issued.
 
-# Determine which user invoked sudo so we can look up their Entra ID groups.
+# Determine which user to resolve groups for. Explicit -e cert_user=<name>
+# takes priority; falls back to SUDO_USER, then the current user.
 - name: Get invoking username
   ansible.builtin.set_fact:
-    scep_invoking_user: "{{ ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id']) }}"
+    scep_invoking_user: "{{ cert_user | default(ansible_facts['env'].get('SUDO_USER', ansible_facts['user_id'])) }}"
 
 - name: Get groups for invoking user
   ansible.builtin.shell:
