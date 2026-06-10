@@ -9,10 +9,16 @@
 #
 #   ansible-pull -U <repo-url> playbooks/system_user.yml
 #
+# To disable suspend and set screen timeout to 30 min, pass -e sleep=false:
+#   ansible-pull -U <repo-url> playbooks/system_user.yml -e sleep=false
+#
 # The OPKSSH Azure tenant/client IDs come from vault.yml.
 - name: System install (user privilege)
   hosts: linux_clients
   become: false
+  vars:
+    # When false: disable suspend and set screen blank to 30 min.
+    sleep: true
 
   tasks:
     - block:
@@ -67,19 +73,22 @@
                     - http://localhost:11110/login-callback
 
         # --- GNOME power settings --------------------------------------------
-        - name: Disable screen blank timeout
+        - name: Set screen blank timeout to 30 minutes
           ansible.builtin.command:
-            cmd: gsettings set org.gnome.desktop.session idle-delay 0
+            cmd: gsettings set org.gnome.desktop.session idle-delay 1800
+          when: not (sleep | bool)
           changed_when: true
 
         - name: Disable automatic suspend on AC power
           ansible.builtin.command:
             cmd: gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+          when: not (sleep | bool)
           changed_when: true
 
         - name: Disable automatic suspend on battery
           ansible.builtin.command:
             cmd: gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+          when: not (sleep | bool)
           changed_when: true
 
         # --- GNOME extensions ------------------------------------------------
