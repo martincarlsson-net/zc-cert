@@ -73,21 +73,42 @@
                     - http://localhost:11110/login-callback
 
         # --- GNOME power settings --------------------------------------------
+        # gsettings requires a running D-Bus session to persist changes.
+        # XDG_RUNTIME_DIR is always set by the login session for the current user.
+        - name: Resolve user D-Bus session socket
+          ansible.builtin.set_fact:
+            gnome_dbus: "unix:path={{ ansible_facts['env']['XDG_RUNTIME_DIR'] }}/bus"
+          when: not (sleep | bool)
+
         - name: Set screen blank timeout to 30 minutes
           ansible.builtin.command:
             cmd: gsettings set org.gnome.desktop.session idle-delay 1800
+          environment:
+            DBUS_SESSION_BUS_ADDRESS: "{{ gnome_dbus }}"
+          when: not (sleep | bool)
+          changed_when: true
+
+        - name: Disable screen lock on idle
+          ansible.builtin.command:
+            cmd: gsettings set org.gnome.desktop.screensaver lock-enabled false
+          environment:
+            DBUS_SESSION_BUS_ADDRESS: "{{ gnome_dbus }}"
           when: not (sleep | bool)
           changed_when: true
 
         - name: Disable automatic suspend on AC power
           ansible.builtin.command:
             cmd: gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+          environment:
+            DBUS_SESSION_BUS_ADDRESS: "{{ gnome_dbus }}"
           when: not (sleep | bool)
           changed_when: true
 
         - name: Disable automatic suspend on battery
           ansible.builtin.command:
             cmd: gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+          environment:
+            DBUS_SESSION_BUS_ADDRESS: "{{ gnome_dbus }}"
           when: not (sleep | bool)
           changed_when: true
 
