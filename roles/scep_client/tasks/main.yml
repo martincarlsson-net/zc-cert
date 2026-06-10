@@ -1,11 +1,10 @@
 ---
 # scep_client role
-# Prepares a Linux host to enrol certificates from FortiAuthenticator (zitfac)
-# over SCEP using certmonger:
+# Prepares a Linux host to enrol certificates over SCEP using certmonger:
 #   1. installs/starts certmonger
-#   2. deploys the Carasent CA trust chain
+#   2. deploys the issuing CA trust chain to the system trust store
 #   3. installs a certmonger-scoped OpenSSL config that re-enables SHA-1
-#      signature verification (the FAC signs SCEP responses with SHA-1 while
+#      signature verification (the CA signs SCEP responses with SHA-1 while
 #      the system-wide crypto policy stays strict)
 #   4. registers the SCEP CA with a wrapper helper that ties it all together
 
@@ -23,7 +22,7 @@
 # --- CA trust chain --------------------------------------------------------
 # The issuing CA signs the device certs; the root anchors the chain and is used
 # to verify the SCEP response signer. Both are placed in the system trust store.
-- name: Deploy Carasent CA certificates to the system trust anchors
+- name: Deploy CA certificates to the system trust anchors
   copy:
     src: "{{ item }}"
     dest: "{{ scep_anchor_dir }}/{{ item }}"
@@ -73,7 +72,7 @@
 # what each flag does.
 - name: Install the SCEP submit wrapper helper
   template:
-    src: scep-submit-carasent.j2
+    src: scep-submit.j2
     dest: "{{ scep_helper_path }}"
     owner: root
     group: root

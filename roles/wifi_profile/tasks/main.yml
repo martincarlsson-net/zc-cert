@@ -38,8 +38,8 @@
       Missing {{ wifi_client_cert }} or {{ wifi_private_key }}.
       The scep_enroll role must run successfully before deploying the Wi-Fi profile.
 
-# The EAP server cert (CN=fac.zitac.net) is signed by zitac_fortiauth_root, so
-# the client must trust that CA to validate the RADIUS server during EAP-TLS.
+# The RADIUS server presents a TLS certificate during EAP-TLS. The client must
+# trust the CA that signed it; that CA is shipped as eap_server_ca.crt.
 - name: Deploy the EAP server CA to the system trust anchors
   copy:
     src: "{{ wifi_eap_server_ca_file }}"

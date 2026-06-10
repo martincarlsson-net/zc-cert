@@ -1,5 +1,5 @@
 ---
-# Non-sensitive defaults shared by all wifi_clients.
+# Non-sensitive defaults shared by all linux_clients.
 # Org-specific and sensitive values (SCEP URL, CA names, challenge password,
 # Wi-Fi SSID, certificate subject, Telegram credentials) live in vault.yml.
 
@@ -24,6 +24,18 @@ cert_subject: "CN={{ cert_subject_cn }},OU=Linux,O={{ cert_org }},C={{ cert_coun
 
 wifi_test_status: "/var/log/wifi-cert-test.status"
 wifi_test_log:    "/var/log/wifi-cert-test.log"
+
+# ---------------------------------------------------------------------------
+# Workstation setup (himmelblau.yml / system_root.yml / system_user.yml).
+# These values are organisation-specific and MUST be provided by vault.yml —
+# they are intentionally NOT defined here so nothing identifying is committed
+# to this public repo:
+#
+#   entra_domains:     # list, e.g. ["example.com"] — primary Entra ID domain(s)
+#   hostname_prefix:   # site/org code prefixed to the product serial as hostname
+#   opkssh_tenant_id:  # Azure tenant (GUID) for the OPKSSH OIDC issuer
+#   opkssh_client_id:  # Azure app client ID (GUID) for OPKSSH
+# ---------------------------------------------------------------------------
 
 # Telegram notification (sender script shared by the test and the rescue block).
 # Credentials (telegram_bot_token, telegram_chat_id) come from vault.yml.

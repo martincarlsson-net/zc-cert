@@ -1,0 +1,251 @@
+---
+# ===========================================================================
+# STEP 1 of 4 — Himmelblau / Entra ID join
+# ===========================================================================
+# Installs and configures Himmelblau so the workstation authenticates its
+# users against Microsoft Entra ID. REBOOT after this playbook, then log in
+# with your Entra ID user before running the remaining steps.
+#
+# Run with ansible-pull (bash is the default; override with -e to choose zsh):
+#   sudo ansible-pull -U <repo-url> playbooks/himmelblau.yml
+#   sudo ansible-pull -U <repo-url> playbooks/himmelblau.yml -e shell=zsh
+#
+# The Entra ID domain(s) come from vault.yml (entra_domains) so no
+# organisation-specific value is committed to this public repo.
+- name: Configure Himmelblau on Fedora hosts
+  hosts: linux_clients
+  become: true
+  vars:
+    # Default shell for Entra ID users. Override at runtime with -e shell=zsh.
+    shell: "bash"
+    # Primary tenant domain(s) — sourced from vault.yml, not hard-coded.
+    himmelblau_domains: "{{ entra_domains }}"
+    himmelblau_hsm_type: tpm_bound_soft_if_possible
+    himmelblau_home_attr: CN
+    himmelblau_home_alias: SPN
+    himmelblau_shell_map:
+      bash: /bin/bash
+      zsh: /bin/zsh
+    himmelblau_default_shell: "{{ himmelblau_shell_map.get(shell | lower, '') }}"
+    himmelblau_allowed_shells:
+      - /bin/bash
+      - /bin/zsh
+
+  pre_tasks:
+    # Deploy the shared Telegram sender before the main block so it is
+    # available to the rescue notification even if the first task fails.
+    - name: Deploy Telegram notification sender
+      include_role:
+        name: telegram
+
+  tasks:
+    - block:
+        - name: Upgrade system packages
+          ansible.builtin.command:
+            cmd: dnf -y upgrade --refresh
+          changed_when: false
+
+        - name: Add himmelblau package signing key
+          ansible.builtin.rpm_key:
+            state: present
+            key: https://packages.himmelblau-idm.org/himmelblau.asc
+
+        - name: Add himmelblau repository
+          ansible.builtin.command:
+            cmd: dnf config-manager addrepo --from-repofile=https://packages.himmelblau-idm.org/stable/latest/rpm/fedora43/himmelblau.repo
+            creates: /etc/yum.repos.d/himmelblau.repo
+
+        - name: Refresh package metadata
+          ansible.builtin.command:
+            cmd: dnf -y makecache
+          changed_when: false
+
+        - name: Install himmelblau packages
+          ansible.builtin.dnf:
+            name:
+              - himmelblau
+              - pam-himmelblau
+              - nss-himmelblau
+              - himmelblau-sshd-config
+              - himmelblau-qr-greeter
+              - himmelblau-sso
+              - o365
+              - himmelblau-selinux
+            state: present
+
+        - name: Check TPM functionality via tpm2_getcap
+          ansible.builtin.command:
+            cmd: tpm2_getcap properties-fixed
+          register: himmelblau_tpm_getcap
+          changed_when: false
+          failed_when: false
+
+        - name: Set TPM availability fact
+          ansible.builtin.set_fact:
+            himmelblau_tpm_available: >-
+              {{ himmelblau_tpm_getcap.rc == 0 and
+                 (himmelblau_tpm_getcap.stdout is search('TPM2_PT_FAMILY_INDICATOR')) and
+                 (himmelblau_tpm_getcap.stdout is search('TPM2_PT_MANUFACTURER')) }}
+
+        - name: Fail when TPM is required but not available
+          ansible.builtin.fail:
+            msg: >-
+              Himmelblau hsm_type is set to 'tpm' but a functional TPM was not detected.
+              The check runs 'tpm2_getcap properties-fixed' and expects TPM2 properties.
+              Consider setting himmelblau_hsm_type to 'tpm_if_possible' on this host.
+          when: himmelblau_hsm_type == 'tpm' and not himmelblau_tpm_available
+
+        - name: Warn when TPM is unavailable
+          ansible.builtin.debug:
+            msg: >-
+              No functional TPM detected. Himmelblau will fall back to software HSM
+              for himmelblau_hsm_type={{ himmelblau_hsm_type }}.
+          when:
+            - himmelblau_hsm_type in ['tpm_if_possible', 'tpm_bound_soft_if_possible']
+            - not himmelblau_tpm_available
+
+        - name: Validate shell selection
+          ansible.builtin.assert:
+            that:
+              - (shell | lower) in ['bash', 'zsh']
+            fail_msg: "shell must be either 'bash' or 'zsh'."
+
+        - name: Validate default shell path
+          ansible.builtin.assert:
+            that:
+              - himmelblau_default_shell is string
+              - himmelblau_default_shell | length > 0
+              - himmelblau_default_shell.startswith('/')
+              - himmelblau_default_shell in himmelblau_allowed_shells
+            fail_msg: >-
+              himmelblau_default_shell must be an absolute path and one of:
+              {{ himmelblau_allowed_shells | join(', ') }}.
+
+        - name: Install himmelblau config
+          ansible.builtin.template:
+            src: templates/himmelblau.conf.j2
+            dest: /etc/himmelblau/himmelblau.conf
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Detect fingerprint reader (USB)
+          ansible.builtin.command:
+            cmd: lsusb
+          register: lsusb_output
+          changed_when: false
+          failed_when: false
+
+        - name: Determine whether to enable fingerprint auth
+          ansible.builtin.set_fact:
+            authselect_with_fingerprint: >-
+              {{ lsusb_output.stdout is search('(?i)fingerprint|synaptics|validity|goodix|elan|authentec|egis|aes|fpc') }}
+
+        - name: Install fingerprint auth packages
+          ansible.builtin.dnf:
+            name:
+              - fprintd
+            state: present
+          when: authselect_with_fingerprint
+
+        - name: Enable fingerprint auth service
+          ansible.builtin.systemd:
+            name: fprintd
+            enabled: true
+            state: started
+          when: authselect_with_fingerprint
+
+        - name: Determine current authselect profile
+          ansible.builtin.command:
+            cmd: authselect current --raw
+          register: authselect_current
+          changed_when: false
+
+        - name: Build target authselect profile
+          ansible.builtin.set_fact:
+            authselect_target: "himmelblau with-mkhomedir{{ ' with-fingerprint' if authselect_with_fingerprint else '' }}"
+
+        - name: Configure authselect for himmelblau
+          ansible.builtin.command:
+            cmd: "authselect select himmelblau with-mkhomedir{{ ' with-fingerprint' if authselect_with_fingerprint else '' }}"
+          changed_when: true
+          when: (authselect_current.stdout | trim) != authselect_target
+
+        - name: Remove existing fingerprint PAM lines
+          ansible.builtin.lineinfile:
+            path: "{{ item }}"
+            regexp: '^\s*auth\s+sufficient\s+pam_fprintd\.so\s*$'
+            state: absent
+          loop:
+            - /etc/pam.d/sudo
+            - /etc/pam.d/sudo-i
+          when: authselect_with_fingerprint
+
+        - name: Ensure polkit PAM file exists
+          ansible.builtin.copy:
+            src: /usr/lib/pam.d/polkit-1
+            dest: /etc/pam.d/polkit-1
+            owner: root
+            group: root
+            mode: "0644"
+            remote_src: true
+          when: authselect_with_fingerprint
+
+        - name: Remove existing fingerprint PAM line from polkit
+          ansible.builtin.lineinfile:
+            path: /etc/pam.d/polkit-1
+            regexp: '^\s*auth\s+sufficient\s+pam_fprintd\.so\s*$'
+            state: absent
+          when: authselect_with_fingerprint
+
+        - name: Ensure fingerprint PAM line is present after header
+          ansible.builtin.lineinfile:
+            path: "{{ item }}"
+            line: "auth       sufficient   pam_fprintd.so"
+            insertafter: '^#%PAM-1\\.0$'
+            firstmatch: true
+            state: present
+          loop:
+            - /etc/pam.d/sudo
+            - /etc/pam.d/sudo-i
+            - /etc/pam.d/polkit-1
+          when: authselect_with_fingerprint
+
+        - name: Set SELinux to permissive
+          ansible.posix.selinux:
+            policy: targeted
+            state: permissive
+
+      rescue:
+        - name: Send Telegram failure notification
+          command:
+            argv:
+              - "{{ telegram_send_script }}"
+              - |-
+                ❌ <b>Himmelblau / Entra ID join failed (step 1)</b>
+                Host: <code>{{ ansible_facts['hostname'] }}</code>
+                <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+                Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
+                Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
+          failed_when: false
+          changed_when: false
+
+        - name: Re-raise the original failure
+          fail:
+            msg: >-
+              {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
+
+  post_tasks:
+    - name: Send Telegram completion notification
+      command:
+        argv:
+          - "{{ telegram_send_script }}"
+          - |-
+            ✅ <b>Himmelblau / Entra ID join complete (step 1)</b>
+            Host: <code>{{ ansible_facts['hostname'] }}</code>
+            <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+            ⚠️ Reboot required — then log in as your Entra ID user before running step 2.
+      failed_when: false
+      changed_when: false

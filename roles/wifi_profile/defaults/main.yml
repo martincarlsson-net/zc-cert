@@ -7,12 +7,11 @@ wifi_client_cert: "/etc/pki/tls/certs/scep-wifi.crt"
 wifi_private_key: "/etc/pki/tls/private/scep-wifi.key"
 
 # CA used to validate the RADIUS/EAP server certificate the AP presents.
-# The FortiAuthenticator EAP server cert (CN=fac.zitac.net) is signed by the
-# INTERNAL zitac_fortiauth_root CA — not the Carasent PKI that issues client
-# certs. Confirmed from the wpa_supplicant handshake (server chain
-# fac.zitac.net -> zitac_fortiauth_root). Shipped with the role.
-wifi_eap_server_ca_file: "zitac_fortiauth_root.crt"
-wifi_ca_cert: "/etc/pki/ca-trust/source/anchors/zitac_fortiauth_root.crt"
+# This CA is separate from the issuing CA that signs the client certs —
+# it is the CA that signed the RADIUS server's TLS certificate.
+# Confirmed from the EAP-TLS handshake (server cert chain inspection).
+wifi_eap_server_ca_file: "eap_server_ca.crt"
+wifi_ca_cert: "/etc/pki/ca-trust/source/anchors/eap_server_ca.crt"
 
 # EAP-TLS outer identity sent to the RADIUS server. Matches the enrolled cert CN.
 wifi_identity: "{{ ansible_facts['hostname'] }}-{{ ansible_facts['machine_id'][-6:] }}"

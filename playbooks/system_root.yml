@@ -1,0 +1,444 @@
+---
+# ===========================================================================
+# STEP 2 of 4 — System install (root privilege)
+# ===========================================================================
+# All privileged setup: hostname, third-party repos, system packages, Docker,
+# libvirt, snapper, and CLI tooling. Run AFTER the Himmelblau reboot, logged in
+# as your Entra ID user:
+#
+#   sudo ansible-pull -U <repo-url> playbooks/system_root.yml
+#
+# Organisation-specific values (hostname prefix) come from vault.yml.
+- name: System install (root privilege)
+  hosts: linux_clients
+  become: true
+  vars:
+    install_vim_default_editor: false
+
+  pre_tasks:
+    - name: Deploy Telegram notification sender
+      include_role:
+        name: telegram
+
+  tasks:
+    - block:
+        - name: Determine invoking user
+          ansible.builtin.set_fact:
+            install_invoking_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
+
+        # --- Hostname -------------------------------------------------------
+        # Names the host "<hostname_prefix>-<product serial>". The prefix is an
+        # org/site code kept in vault.yml so it is not committed to this repo.
+        - name: Read product serial
+          ansible.builtin.command:
+            cmd: cat /sys/devices/virtual/dmi/id/product_serial
+          register: install_product_serial
+          changed_when: false
+          failed_when: false
+
+        - name: Set hostname from prefix + serial
+          ansible.builtin.hostname:
+            name: "{{ hostname_prefix }}-{{ install_product_serial.stdout | trim }}"
+          when:
+            - hostname_prefix is defined
+            - install_product_serial.stdout | trim | length > 0
+
+        # --- OPKSSH client RPM (user config is done in step 3) ---------------
+        - name: Install OPKSSH client RPM
+          ansible.builtin.dnf:
+            name: https://github.com/openpubkey/opkssh/releases/download/v0.14.0/opkssh_0.14.0_linux_amd64.rpm
+            state: present
+            disable_gpg_check: true
+
+        # --- Common CLI packages ---------------------------------------------
+        - name: Check for existing kubectl package
+          ansible.builtin.command:
+            cmd: rpm -q kubectl
+          register: kubectl_check
+          failed_when: false
+          changed_when: false
+
+        - name: Build common package list
+          ansible.builtin.set_fact:
+            install_common_packages: >-
+              {{
+                [
+                  'awscli2',
+                  'bash-completion',
+                  'bat',
+                  'btop',
+                  'bzip2',
+                  'chromium',
+                  'curl',
+                  'dnf-plugins-core',
+                  'dnf-plugin-snapper',
+                  'duf',
+                  'fastfetch',
+                  'fd-find',
+                  'fping',
+                  'fzf',
+                  'gcc-c++',
+                  'gdu',
+                  'gimp',
+                  'golang',
+                  'git',
+                  'gnupg',
+                  'httpie',
+                  'httping',
+                  'kitty',
+                  'kitty-terminfo',
+                  'mariadb-client-utils',
+                  'meld',
+                  'mycli',
+                  'neovim',
+                  'nodejs',
+                  'ollama',
+                  'parallel',
+                  'parzip',
+                  'pbzip2',
+                  'pgcli',
+                  'pigz',
+                  'pv',
+                  'python3-dns',
+                  'python3-jinja2',
+                  'python3-github3py',
+                  'pwgen',
+                  'pxz',
+                  'rclone',
+                  'ripgrep',
+                  'rsync',
+                  'snapper',
+                  'thefuck',
+                  'tldr',
+                  'tmate',
+                  'tmux',
+                  'trivy',
+                  'unzip',
+                  'uv',
+                  'vim',
+                  'vlc',
+                  'yq',
+                  'zip',
+                  'zsh',
+                  'zstd',
+                  'xclip',
+                  'xz'
+                ]
+                + ((kubectl_check.rc != 0) | ternary(['kubernetes-client'], []))
+              }}
+
+        - name: Install common packages
+          ansible.builtin.dnf:
+            name: "{{ install_common_packages }}"
+            state: latest
+
+        - name: Enable snapper-cleanup.timer
+          ansible.builtin.service:
+            name: snapper-cleanup.timer
+            enabled: true
+
+        - name: Install vim-default-editor
+          ansible.builtin.dnf:
+            name: vim-default-editor
+            state: present
+            allow_erasing: true
+          when: install_vim_default_editor
+
+        - name: Set default editor to nvim
+          ansible.builtin.replace:
+            path: /etc/profile.d/vim-default-editor.sh
+            regexp: '\bvim\b'
+            replace: nvim
+          when: install_vim_default_editor
+
+        - name: Create snapshot config for root
+          ansible.builtin.command:
+            cmd: snapper -c root create-config /
+            creates: /etc/snapper/configs/root
+
+        - name: Create snapshot config for home
+          ansible.builtin.command:
+            cmd: snapper -c home create-config /home
+            creates: /etc/snapper/configs/home
+
+        # --- 1Password -------------------------------------------------------
+        - name: Add repository for 1password
+          ansible.builtin.yum_repository:
+            name: 1password
+            description: 1Password Stable Channel
+            baseurl: https://downloads.1password.com/linux/rpm/stable/$basearch
+            enabled: true
+            gpgcheck: true
+            gpgkey: https://downloads.1password.com/linux/keys/1password.asc
+
+        - name: Install 1password
+          ansible.builtin.dnf:
+            name:
+              - 1password
+              - 1password-cli
+            state: latest
+
+        # --- OpenTofu --------------------------------------------------------
+        - name: Add repository for opentofu
+          ansible.builtin.yum_repository:
+            name: opentofu
+            description: Opentofu channel
+            baseurl: https://packages.opentofu.org/opentofu/tofu/rpm_any/rpm_any/$basearch
+            enabled: true
+            gpgcheck: true
+            gpgkey:
+              - https://get.opentofu.org/opentofu.gpg
+              - https://packages.opentofu.org/opentofu/tofu/gpgkey
+
+        - name: Install opentofu
+          ansible.builtin.dnf:
+            name:
+              - tofu
+            state: latest
+
+        # --- Docker CE -------------------------------------------------------
+        - name: Add repository for docker-ce
+          ansible.builtin.yum_repository:
+            name: docker-ce-stable
+            description: Docker CE Stable - $basearch
+            baseurl: https://download.docker.com/linux/fedora/$releasever/$basearch/stable
+            enabled: true
+            gpgcheck: true
+            gpgkey:
+              - https://download.docker.com/linux/fedora/gpg
+
+        - name: Install docker-ce
+          ansible.builtin.dnf:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: latest
+
+        - name: Start docker
+          ansible.builtin.service:
+            name: docker
+            state: started
+            enabled: true
+
+        - name: Add invoking user to docker group
+          ansible.builtin.user:
+            name: "{{ install_invoking_user }}"
+            groups: docker
+            append: true
+
+        # --- Virtualization --------------------------------------------------
+        - name: Install virtualization package group
+          ansible.builtin.dnf:
+            name: "@virtualization"
+            state: present
+
+        - name: Configure libvirt firewall backend for Docker compatibility
+          ansible.builtin.lineinfile:
+            path: /etc/libvirt/network.conf
+            regexp: '^\s*firewall_backend\s*='
+            line: 'firewall_backend = "iptables"'
+            create: true
+            mode: "0644"
+
+        # --- Microsoft Edge --------------------------------------------------
+        - name: Add repository for Microsoft Edge
+          ansible.builtin.yum_repository:
+            name: edge-yum
+            description: edge-yum
+            baseurl: https://packages.microsoft.com/yumrepos/edge/
+            enabled: true
+            gpgcheck: true
+            gpgkey:
+              - https://packages.microsoft.com/yumrepos/edge/repodata/repomd.xml.key
+
+        - name: Install Microsoft Edge
+          ansible.builtin.dnf:
+            name:
+              - microsoft-edge-stable
+            state: latest
+
+        # --- Netbird ---------------------------------------------------------
+        - name: Add repository for netbird
+          ansible.builtin.yum_repository:
+            name: netbird
+            description: Netbird
+            baseurl: https://pkgs.netbird.io/yum/
+            enabled: true
+            gpgcheck: false
+            repo_gpgcheck: true
+            gpgkey: https://pkgs.netbird.io/yum/repodata/repomd.xml.key
+
+        - name: Install Netbird
+          ansible.builtin.dnf:
+            name:
+              - netbird
+              - libappindicator-gtk3
+              - libappindicator
+              - netbird-ui
+              - gnome-shell-extension-appindicator
+            state: latest
+
+        # --- Terra -----------------------------------------------------------
+        - name: Add Terra repository
+          ansible.builtin.yum_repository:
+            name: terra
+            description: Terra repository
+            baseurl: https://repos.fyralabs.com/terra$releasever
+            enabled: true
+            gpgcheck: true
+            gpgkey: https://repos.fyralabs.com/terra$releasever/key.asc
+
+        - name: Install Terra packages
+          ansible.builtin.dnf:
+            name:
+              - amdctl
+              - neohtop
+              - neovide
+              - nerd-fonts
+              - topgrade
+            state: latest
+
+        # --- Brave -----------------------------------------------------------
+        - name: Add Brave repository
+          ansible.builtin.yum_repository:
+            name: brave-browser
+            description: Brave Browser
+            baseurl: https://brave-browser-rpm-release.s3.brave.com/$basearch
+            enabled: true
+            gpgcheck: true
+            gpgkey: https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+
+        - name: Install Brave packages
+          ansible.builtin.dnf:
+            name:
+              - brave-browser
+              - brave-keyring
+            state: latest
+
+        # --- COPR-sourced tooling --------------------------------------------
+        - name: Setup fedora-rpms copr
+          community.general.copr:
+            name: "johan/fedora-rpms"
+
+        - name: Install argocd, helm and minikube
+          ansible.builtin.dnf:
+            name:
+              - argocd
+              - docker-machine-driver-kvm2
+              - helm
+              - minikube
+            state: latest
+
+        - name: Setup k9s copr
+          community.general.copr:
+            name: "luminoso/k9s"
+
+        - name: Install k9s
+          ansible.builtin.dnf:
+            name:
+              - k9s
+            state: latest
+
+        - name: Setup lazygit copr
+          community.general.copr:
+            name: "atim/lazygit"
+
+        - name: Install lazygit
+          ansible.builtin.dnf:
+            name:
+              - lazygit
+            state: latest
+
+        - name: Setup lazydocker copr
+          community.general.copr:
+            name: "rivenirvana/lazydocker"
+
+        - name: Install lazydocker
+          ansible.builtin.dnf:
+            name:
+              - lazydocker
+            state: latest
+
+        - name: Setup eza copr
+          community.general.copr:
+            name: "alternateved/eza"
+
+        - name: Install eza
+          ansible.builtin.dnf:
+            name:
+              - eza
+            state: latest
+
+        - name: Setup Jetbrains copr
+          community.general.copr:
+            name: "medzik/jetbrains"
+
+        - name: Install phpstorm, datagrip
+          ansible.builtin.dnf:
+            name:
+              - phpstorm
+              - datagrip
+            state: latest
+
+        - name: Setup Slack copr
+          community.general.copr:
+            name: "rocketraman/slack-repo"
+
+        - name: Install slack-repo
+          ansible.builtin.dnf:
+            name:
+              - slack-repo
+            state: latest
+
+        - name: Install slack
+          ansible.builtin.dnf:
+            name:
+              - slack
+            state: latest
+
+        - name: Setup Helium copr
+          community.general.copr:
+            name: "imput/helium"
+
+        - name: Install helium
+          ansible.builtin.dnf:
+            name:
+              - helium-bin
+            state: latest
+
+      rescue:
+        - name: Send Telegram failure notification
+          command:
+            argv:
+              - "{{ telegram_send_script }}"
+              - |-
+                ❌ <b>System install (root) failed (step 2)</b>
+                Host: <code>{{ ansible_facts['hostname'] }}</code>
+                <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+                Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
+                Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
+          failed_when: false
+          changed_when: false
+
+        - name: Re-raise the original failure
+          fail:
+            msg: >-
+              {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
+
+  post_tasks:
+    - name: Send Telegram completion notification
+      command:
+        argv:
+          - "{{ telegram_send_script }}"
+          - |-
+            ✅ <b>System install (root) complete (step 2)</b>
+            Host: <code>{{ ansible_facts['hostname'] }}</code>
+            <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+            Reboot recommended before running step 3.
+      failed_when: false
+      changed_when: false

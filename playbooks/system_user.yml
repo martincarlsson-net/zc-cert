@@ -1,0 +1,163 @@
+---
+# ===========================================================================
+# STEP 3 of 4 — System install (user privilege)
+# ===========================================================================
+# Per-user desktop configuration: SSH defaults, OPKSSH (Entra/OIDC SSH), GNOME
+# extensions, LazyVim and GUI flatpaks. Runs as your logged-in Entra ID user
+# (NO sudo) so files land in the right home directory and the GNOME session is
+# reachable:
+#
+#   ansible-pull -U <repo-url> playbooks/system_user.yml
+#
+# The OPKSSH Azure tenant/client IDs come from vault.yml.
+- name: System install (user privilege)
+  hosts: linux_clients
+  become: false
+
+  pre_tasks:
+    # The sender script lives in /usr/local/sbin (root-owned) so this block
+    # needs privilege escalation even though the rest of the play does not.
+    - block:
+        - name: Deploy Telegram notification sender
+          include_role:
+            name: telegram
+      become: true
+
+  tasks:
+    - block:
+        - name: Refuse to run as root
+          ansible.builtin.fail:
+            msg: "Run this playbook as your Entra ID user WITHOUT sudo."
+          when: ansible_user_id == "root"
+
+        # --- SSH defaults ----------------------------------------------------
+        - name: Ensure SSH config directory exists
+          ansible.builtin.file:
+            path: "{{ ansible_env.HOME }}/.ssh"
+            state: directory
+            mode: "0700"
+
+        - name: Configure SSH keepalive defaults
+          ansible.builtin.blockinfile:
+            path: "{{ ansible_env.HOME }}/.ssh/config"
+            create: true
+            mode: "0600"
+            block: |
+              Host *
+                  ServerAliveInterval 180
+                  ServerAliveCountMax 2
+
+        # --- OPKSSH (Entra/OIDC SSH) client config --------------------------
+        # The RPM is installed in step 2 (root). Here we write the per-user config.
+        - name: Ensure OPKSSH config directory exists
+          ansible.builtin.file:
+            path: "{{ ansible_env.HOME }}/.opk"
+            state: directory
+            mode: "0700"
+
+        - name: Configure OPKSSH client config
+          ansible.builtin.copy:
+            dest: "{{ ansible_env.HOME }}/.opk/config.yml"
+            mode: "0600"
+            content: |
+              ---
+              default_provider: webchooser
+
+              providers:
+                - alias: azure microsoft
+                  issuer: https://login.microsoftonline.com/{{ opkssh_tenant_id }}/v2.0
+                  client_id: {{ opkssh_client_id }}
+                  scopes: openid profile email offline_access
+                  access_type: offline
+                  prompt: none
+                  redirect_uris:
+                    - http://localhost:3000/login-callback
+                    - http://localhost:10001/login-callback
+                    - http://localhost:11110/login-callback
+
+        # --- GNOME extensions ------------------------------------------------
+        - name: Install GNOME Extension Manager (flatpak, per-user)
+          community.general.flatpak:
+            name: com.mattjakeman.ExtensionManager
+            state: present
+            method: user
+
+        - name: List enabled GNOME extensions
+          ansible.builtin.command:
+            cmd: gnome-extensions list --enabled
+          register: enabled_gnome_extensions
+          changed_when: false
+          failed_when: false
+
+        - name: Enable appindicator GNOME extension
+          ansible.builtin.command:
+            cmd: gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+          register: enable_appindicator_extension
+          changed_when: enable_appindicator_extension.rc == 0
+          failed_when: false
+          when: "'appindicatorsupport@rgcjonas.gmail.com' not in enabled_gnome_extensions.stdout_lines"
+
+        # --- LazyVim ---------------------------------------------------------
+        - name: Check if LazyVim config already exists
+          ansible.builtin.stat:
+            path: "{{ ansible_env.HOME }}/.config/nvim"
+          register: lazyvim_config_stat
+
+        - name: Clone the LazyVim starter
+          ansible.builtin.git:
+            repo: "https://github.com/LazyVim/starter"
+            dest: "{{ ansible_env.HOME }}/.config/nvim"
+            update: false
+          when: not lazyvim_config_stat.stat.exists
+
+        - name: Remove the LazyVim .git folder
+          ansible.builtin.file:
+            path: "{{ ansible_env.HOME }}/.config/nvim/.git"
+            state: absent
+          when: not lazyvim_config_stat.stat.exists
+
+        # --- GUI flatpaks ----------------------------------------------------
+        - name: Install DBeaver (flatpak, per-user)
+          community.general.flatpak:
+            name: io.dbeaver.DBeaverCommunity
+            state: present
+            method: user
+
+      rescue:
+        - name: Send Telegram failure notification
+          command:
+            argv:
+              - "{{ telegram_send_script }}"
+              - |-
+                ❌ <b>System install (user) failed (step 3)</b>
+                Host: <code>{{ ansible_facts['hostname'] }}</code>
+                User: <code>{{ ansible_user_id }}</code>
+                <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+                Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
+                Error: {{ (ansible_failed_result.msg | default('unknown')) | replace('<', '&lt;') | replace('>', '&gt;') }}
+          failed_when: false
+          changed_when: false
+          # Sender script is root-owned — escalate for this task only.
+          become: true
+
+        - name: Re-raise the original failure
+          fail:
+            msg: >-
+              {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
+
+  post_tasks:
+    - name: Send Telegram completion notification
+      command:
+        argv:
+          - "{{ telegram_send_script }}"
+          - |-
+            ✅ <b>System install (user) complete (step 3)</b>
+            Host: <code>{{ ansible_facts['hostname'] }}</code>
+            User: <code>{{ ansible_user_id }}</code>
+            <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+            Ready for step 4 — certificate enrolment and Wi-Fi.
+      failed_when: false
+      changed_when: false
+      become: true

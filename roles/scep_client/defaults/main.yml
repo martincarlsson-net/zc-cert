@@ -4,19 +4,19 @@
 # fails loudly if the vault is missing rather than silently using wrong values.
 
 # CA certificates shipped with the role and deployed to the system trust store.
-scep_issuing_ca_file: "carasent_fortiauth_issuing.crt"
-scep_root_ca_file: "carasent_fortiauth_root.crt"
+scep_issuing_ca_file: "issuing_ca.crt"
+scep_root_ca_file: "root_ca.crt"
 scep_anchor_dir: "/etc/pki/ca-trust/source/anchors"
 
 # Certificate used to verify the SCEP response signer's chain (scep-submit -N).
-scep_signing_ca_cert: "/etc/pki/ca-trust/source/anchors/carasent_fortiauth_root.crt"
+scep_signing_ca_cert: "/etc/pki/ca-trust/source/anchors/root_ca.crt"
 
-# System TLS CA bundle used to verify the HTTPS connection to the FAC (-R).
+# System TLS CA bundle used to verify the HTTPS connection to the SCEP CA (-R).
 scep_tls_ca_bundle: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 
 # certmonger SCEP helper wrapper and its scoped OpenSSL config (SHA-1 allowance).
 scep_submit_bin: "/usr/libexec/certmonger/scep-submit"
-scep_helper_path: "/usr/local/bin/scep-submit-carasent"
+scep_helper_path: "/usr/local/bin/scep-submit"
 certmonger_conf_dir: "/etc/certmonger"
 openssl_sha1_cnf: "/etc/certmonger/openssl-sha1.cnf"
 openssl_sha1_backend: "/etc/certmonger/opensslcnf-sha1.config"

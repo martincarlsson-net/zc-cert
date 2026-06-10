@@ -9,7 +9,7 @@
 # Secrets (SCEP URL, CA names, challenge password, org details, Wi-Fi SSID,
 # Telegram credentials) are stored in group_vars/all/vault.yml (ansible-vault).
 - name: SCEP certificate enrolment and EAP-TLS Wi-Fi profile deployment
-  hosts: wifi_clients
+  hosts: linux_clients
   become: true
   tasks:
     # Reset the test status at the very start so a stale value from a previous
@@ -63,3 +63,17 @@
           fail:
             msg: >-
               {{ ansible_failed_task.name }}: {{ ansible_failed_result.msg | default('see above') }}
+
+  post_tasks:
+    - name: Send Telegram completion notification
+      command:
+        argv:
+          - "{{ telegram_send_script }}"
+          - |-
+            ✅ <b>Cert enrolment + Wi-Fi complete (step 4)</b>
+            Host: <code>{{ ansible_facts['hostname'] }}</code>
+            <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+
+            Certificate enrolled and Wi-Fi profile deployed successfully.
+      failed_when: false
+      changed_when: false
