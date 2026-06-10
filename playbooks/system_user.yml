@@ -19,7 +19,7 @@
         - name: Refuse to run as root
           ansible.builtin.fail:
             msg: "Run this playbook as your Entra ID user WITHOUT sudo."
-          when: ansible_user_id == "root"
+          when: ansible_facts['user_id'] == "root"
 
         # --- SSH defaults ----------------------------------------------------
         - name: Ensure SSH config directory exists
@@ -67,6 +67,13 @@
                     - http://localhost:11110/login-callback
 
         # --- GNOME extensions ------------------------------------------------
+        - name: Add flathub remote for current user
+          community.general.flatpak_remote:
+            name: flathub
+            state: present
+            flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
+            method: user
+
         - name: Install GNOME Extension Manager (flatpak, per-user)
           community.general.flatpak:
             name: com.mattjakeman.ExtensionManager
@@ -122,7 +129,7 @@
               - |-
                 ❌ <b>System install (user) failed (step 3)</b>
                 Host: <code>{{ ansible_facts['hostname'] }}</code>
-                User: <code>{{ ansible_user_id }}</code>
+                User: <code>{{ ansible_facts['user_id'] }}</code>
                 <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
 
                 Task: {{ ansible_failed_task.name | replace('<', '&lt;') | replace('>', '&gt;') }}
@@ -143,7 +150,7 @@
           - |-
             ✅ <b>System install (user) complete (step 3)</b>
             Host: <code>{{ ansible_facts['hostname'] }}</code>
-            User: <code>{{ ansible_user_id }}</code>
+            User: <code>{{ ansible_facts['user_id'] }}</code>
             <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
 
             Ready for step 4 — certificate enrolment and Wi-Fi.
