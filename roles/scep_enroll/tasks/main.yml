@@ -9,8 +9,8 @@
     scep_invoking_user: "{{ ansible_facts['env']['SUDO_USER'] | default(ansible_facts['user_id']) }}"
 
 - name: Get groups for invoking user
-  ansible.builtin.command:
-    cmd: "id -Gn {{ scep_invoking_user }}"
+  ansible.builtin.shell:
+    cmd: "id -G {{ scep_invoking_user }} | tr ' ' '\n' | xargs -I{} getent group {} | cut -d: -f1"
   register: scep_user_groups
   changed_when: false
 
@@ -18,7 +18,7 @@
   ansible.builtin.set_fact:
     scep_cert_tag: >-
       {{ (cert_group_tags
-          | selectattr('group', 'in', scep_user_groups.stdout.split())
+          | selectattr('group', 'in', scep_user_groups.stdout_lines)
           | map(attribute='tag')
           | list
           | first) }}
