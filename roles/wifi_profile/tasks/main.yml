@@ -66,16 +66,34 @@
   set_fact:
     wifi_mgmt_con: "{{ wifi_mgmt_detect.stdout | trim }}"
 
+# Scan for the target SSID. If it is not visible we are in remote-enrollment
+# mode: install the cert + profile but skip the connection test and rollback.
+- name: Scan for the target SSID in the current environment
+  command: nmcli --fields SSID dev wifi list
+  register: wifi_ssid_scan
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether the target SSID is currently visible
+  set_fact:
+    wifi_ssid_visible: "{{ wifi_ssid in wifi_ssid_scan.stdout }}"
+
+- name: Report SSID visibility
+  debug:
+    msg: "{{ wifi_ssid }} is {{ 'visible — running connection test' if wifi_ssid_visible else 'NOT visible — remote enrollment mode, skipping test' }}"
+
 - name: Fail if no active management Wi-Fi was found
   assert:
     that: wifi_mgmt_con | length > 0
     fail_msg: >-
       Could not determine the active Wi-Fi connection to restore after testing.
       Refusing to proceed — would risk stranding the host off the network.
+  when: wifi_ssid_visible
 
 - name: Report the management Wi-Fi that will be restored after the test
   debug:
     msg: "Management Wi-Fi to restore after the cert test: '{{ wifi_mgmt_con }}'"
+  when: wifi_ssid_visible
 
 # --- Build the EAP-TLS profile --------------------------------------------
 # Recreate from scratch each run for a deterministic, idempotent result.
@@ -144,13 +162,23 @@
     group: root
     mode: "0755"
 
-- name: Reset the previous test status marker
+- name: Reset the previous test status marker (in-office)
   copy:
     dest: "{{ wifi_test_status }}"
     content: "PENDING\n"
     owner: root
     group: root
     mode: "0644"
+  when: wifi_ssid_visible
+
+- name: Mark as remote enrollment — no test will run (SSID not in range)
+  copy:
+    dest: "{{ wifi_test_status }}"
+    content: "REMOTE\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not wifi_ssid_visible
 
 # --- Run the test detached, then recover the SSH connection ---------------
 # Stop any leftover units from a previous run before starting new ones.
@@ -159,6 +187,7 @@
   command: systemctl stop wifi-cert-test.service wifi-cert-failsafe.service wifi-cert-failsafe.timer
   failed_when: false
   changed_when: false
+  when: wifi_ssid_visible
 
 # Failsafe first: force the management Wi-Fi back after wifi_failsafe_delay,
 # independent of the test, so the host can never be left stranded.
@@ -169,6 +198,7 @@
     --unit=wifi-cert-failsafe
     {{ wifi_failsafe_script }}
   changed_when: true
+  when: wifi_ssid_visible
 
 # The test itself runs as a transient unit so it survives the SSH drop caused
 # by switching Wi-Fi networks.
@@ -178,6 +208,7 @@
     --unit=wifi-cert-test
     {{ wifi_test_script }}
   changed_when: true
+  when: wifi_ssid_visible
 
 # The detached test runs asynchronously and may move us onto the cert network;
 # poll its status file (connection-agnostic) until it reaches a terminal state.
@@ -189,15 +220,18 @@
   retries: 40
   delay: 5
   changed_when: false
+  when: wifi_ssid_visible
 
 - name: Read the connection-test log
   command: "cat {{ wifi_test_log }}"
   register: wifi_test_logout
   changed_when: false
+  when: wifi_ssid_visible
 
 - name: Show the connection-test log
   debug:
     msg: "{{ wifi_test_logout.stdout_lines }}"
+  when: wifi_ssid_visible
 
 - name: Report the connection-test outcome
   debug:
@@ -205,3 +239,31 @@
       Cert Wi-Fi connection test result: {{ wifi_test_result.stdout | trim }}.
       {% if wifi_test_result.stdout is search('SUCCESS') %}Connected to the cert SSID with internet — staying on it.{% else %}The profile was rolled back and the host fell back to the previous Wi-Fi.{% endif %}
       A Telegram summary was sent.
+  when: wifi_ssid_visible
+
+# --- Remote enrollment notification (SSID not in range) -------------------
+- name: Send Telegram notification for remote enrollment
+  command:
+    argv:
+      - "{{ telegram_send_script }}"
+      - |-
+        📶 <b>Cert Wi-Fi profile installed (remote)</b>
+        🖥 Host: <code>{{ ansible_facts['hostname'] }}</code>
+        🕒 <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
+        SSID: <code>{{ wifi_ssid }}</code>
+
+        Cert: <code>{{ wifi_client_cert }}</code>
+        Enrolment: <code>{{ lookup('file', '/var/log/zc-enroll.status') | regex_search('ENROLLED=(.+)', '\\1') | first | default('unknown') }}</code>
+
+        ℹ️ SSID not in range — cert enrolled and profile installed.
+        Will connect automatically when device arrives at the office.
+  failed_when: false
+  changed_when: false
+  when: not wifi_ssid_visible
+
+- name: Report remote enrollment outcome
+  debug:
+    msg: >-
+      SSID '{{ wifi_ssid }}' not in range. Cert enrolled and profile installed.
+      Device will connect automatically when it arrives at the office.
+  when: not wifi_ssid_visible
