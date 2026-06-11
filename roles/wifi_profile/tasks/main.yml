@@ -242,6 +242,13 @@
   when: wifi_ssid_visible
 
 # --- Remote enrollment notification (SSID not in range) -------------------
+- name: Read enrolment summary for remote Telegram notification
+  command: cat /var/log/zc-enroll.status
+  register: wifi_remote_enroll_status
+  changed_when: false
+  failed_when: false
+  when: not wifi_ssid_visible
+
 - name: Send Telegram notification for remote enrollment
   command:
     argv:
@@ -252,9 +259,7 @@
         🕒 <code>{{ now().strftime('%Y-%m-%d %H:%M:%S') }}</code>
         SSID: <code>{{ wifi_ssid }}</code>
 
-        Cert: <code>{{ wifi_client_cert }}</code>
-        Enrolment: <code>{{ lookup('file', '/var/log/zc-enroll.status') | regex_search('ENROLLED=(.+)', '\\1') | first | default('unknown') }}</code>
-
+        {{ wifi_remote_enroll_status.stdout | default('') | replace('<', '&lt;') | replace('>', '&gt;') }}
         ℹ️ SSID not in range — cert enrolled and profile installed.
         Will connect automatically when device arrives at the office.
   failed_when: false
