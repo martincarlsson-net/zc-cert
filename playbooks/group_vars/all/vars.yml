@@ -40,13 +40,13 @@ wifi_test_log:    "/var/log/wifi-cert-test.log"
 # Maps group tag (from cert_group_tags in vault) to the Wi-Fi profile to deploy.
 # First match in cert_group_tags wins; that tag is looked up here to get the
 # SSID and NM connection name. Add a new entry for each additional group/SSID.
-wifi_profile_map:
-  webdoc:
-    ssid: "Carasent Webdoc"
-    con_name: "carasent_webdoc"
-  medrave:
-    ssid: "Carasent Medrave"
-    con_name: "carasent_medrave"
+# wifi_profile_map is defined in vault.yml (org-specific SSID names and
+# connection names belong there, not in this public file).
+# Expected structure:
+#   wifi_profile_map:
+#     <tag>:
+#       ssid: "Your SSID Name"
+#       con_name: "your_connection_name"
 
 # Telegram notification (sender script shared by the test and the rescue block).
 # Credentials (telegram_bot_token, telegram_chat_id) come from vault.yml.
