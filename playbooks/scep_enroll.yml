@@ -35,6 +35,11 @@
         - include_role:
             name: scep_enroll   # request the device certificate and wait for issuance
 
+        - name: Resolve Wi-Fi profile from group tag
+          ansible.builtin.set_fact:
+            wifi_ssid: "{{ wifi_profile_map[scep_cert_tag]['ssid'] }}"
+            wifi_con_name: "{{ wifi_profile_map[scep_cert_tag]['con_name'] }}"
+
         - include_role:
             name: wifi_profile  # deploy the EAP-TLS Wi-Fi profile, test + automatic rollback
 
